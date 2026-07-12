@@ -242,7 +242,13 @@ const NODES = [
     delegation:null },
 ];
 
-const MARGIN_X = 140, MARGIN_Y = 100;
+const CANVAS_W = 3200, CANVAS_H = 1950;
+const _rawMinX = Math.min(...NODES.map(n=>n.x));
+const _rawMaxX = Math.max(...NODES.map(n=>n.x+n.w));
+const _rawMinY = Math.min(...NODES.map(n=>n.y));
+const _rawMaxY = Math.max(...NODES.map(n=>n.y+n.h));
+const MARGIN_X = (CANVAS_W - (_rawMaxX-_rawMinX))/2 - _rawMinX;
+const MARGIN_Y = (CANVAS_H - (_rawMaxY-_rawMinY))/2 - _rawMinY;
 NODES.forEach(n => { n.x += MARGIN_X; n.y += MARGIN_Y; });
 
 const EDGES = [
@@ -436,19 +442,43 @@ wrap.addEventListener('mousedown', (e)=>{
   startX = e.pageX; startY = e.pageY; scrollLeft = wrap.scrollLeft; scrollTop = wrap.scrollTop;
 });
 window.addEventListener('mouseup', ()=>{ isDown=false; wrap.classList.remove('grabbing'); });
+function getScrollBounds(){
+  return {
+    maxX: Math.max(0, CANVAS_W*zoom - wrap.clientWidth),
+    maxY: Math.max(0, CANVAS_H*zoom - wrap.clientHeight),
+  };
+}
 window.addEventListener('mousemove', (e)=>{
   if(!isDown) return;
-  wrap.scrollLeft = scrollLeft - (e.pageX - startX);
-  wrap.scrollTop = scrollTop - (e.pageY - startY);
+  const b = getScrollBounds();
+  wrap.scrollLeft = Math.min(b.maxX, Math.max(0, scrollLeft - (e.pageX - startX)));
+  wrap.scrollTop = Math.min(b.maxY, Math.max(0, scrollTop - (e.pageY - startY)));
 });
 
 let zoom = 1;
 function applyZoom(){ canvas.style.transform = `scale(${zoom})`; canvas.style.transformOrigin = '0 0'; }
-document.getElementById('zoom-in').addEventListener('click', ()=>{ zoom = Math.min(1.4, zoom+0.1); applyZoom(); });
-document.getElementById('zoom-out').addEventListener('click', ()=>{ zoom = Math.max(0.45, zoom-0.1); applyZoom(); });
-document.getElementById('zoom-reset').addEventListener('click', ()=>{ zoom = 0.85; applyZoom(); wrap.scrollLeft=0; wrap.scrollTop=0; });
+function clampScroll(){
+  const b = getScrollBounds();
+  wrap.scrollLeft = Math.min(b.maxX, wrap.scrollLeft);
+  wrap.scrollTop = Math.min(b.maxY, wrap.scrollTop);
+}
+document.getElementById('zoom-in').addEventListener('click', ()=>{ zoom = Math.min(1.4, zoom+0.1); applyZoom(); clampScroll(); });
+document.getElementById('zoom-out').addEventListener('click', ()=>{ zoom = Math.max(0.45, zoom-0.1); applyZoom(); clampScroll(); });
+function centerView(z){
+  zoom = z; applyZoom();
+  const minX = Math.min(...NODES.map(n=>n.x));
+  const maxX = Math.max(...NODES.map(n=>n.x+n.w));
+  const minY = Math.min(...NODES.map(n=>n.y));
+  const maxY = Math.max(...NODES.map(n=>n.y+n.h));
+  const contentCx = (minX+maxX)/2, contentCy = (minY+maxY)/2;
+  const viewW = wrap.clientWidth, viewH = wrap.clientHeight;
+  const b = getScrollBounds();
+  wrap.scrollLeft = Math.min(b.maxX, Math.max(0, contentCx*zoom - viewW/2));
+  wrap.scrollTop = Math.min(b.maxY, Math.max(0, contentCy*zoom - viewH/2));
+}
+document.getElementById('zoom-reset').addEventListener('click', ()=>{ centerView(0.85); });
 
-zoom = 0.85; applyZoom();
+centerView(0.85);
 </script>
 </body>
 </html>
