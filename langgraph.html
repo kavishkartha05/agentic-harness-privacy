@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LangGraph — Architecture Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#05070a; --bg2:#0a0e16; --panel:#0d1420; --grid:#101826;
+    --cyan:#00f0ff; --green:#39ff88; --magenta:#ff2ec4; --red:#ff3b3b; --amber:#ffd23f; --violet:#b967ff;
+    --text:#e8f6ff; --text-dim:#7f93a8; --text-mono:#9fd4e0;
+    --border-dim: rgba(232,246,255,0.12);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{ background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; width:100%; height:100%; overflow:hidden; }
+  body{
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(0,240,255,0.05), transparent 40%),
+      radial-gradient(circle at 80% 80%, rgba(185,103,255,0.05), transparent 40%),
+      repeating-linear-gradient(0deg, var(--grid) 0px, var(--grid) 1px, transparent 1px, transparent 48px),
+      repeating-linear-gradient(90deg, var(--grid) 0px, var(--grid) 1px, transparent 1px, transparent 48px);
+  }
+  h1,h2,h3{font-family:'Space Grotesk',sans-serif;}
+  .citation, .mono{font-family:'JetBrains Mono',monospace;}
+
+  #topbar{
+    position:fixed; top:0; left:0; right:0; height:74px; z-index:50;
+    display:flex; align-items:center; justify-content:space-between; padding:0 28px;
+    background:linear-gradient(180deg, rgba(5,7,10,0.97), rgba(5,7,10,0.85));
+    border-bottom:1px solid var(--border-dim); backdrop-filter: blur(6px);
+  }
+  #topbar .title{display:flex; align-items:baseline; gap:14px;}
+  #topbar h1{font-size:20px; font-weight:700; letter-spacing:0.5px;}
+  #topbar h1 span{color:var(--cyan); text-shadow:0 0 12px rgba(0,240,255,0.6);}
+  #topbar .meta{font-size:11px; color:var(--text-dim); letter-spacing:0.5px;}
+  #legend{display:flex; gap:18px; font-size:11px; align-items:center;}
+  .legend-item{display:flex; align-items:center; gap:6px; color:var(--text-dim);}
+  .legend-dot{width:9px; height:9px; border-radius:2px;}
+
+  #canvas-wrap{ position:absolute; top:74px; left:0; right:0; bottom:0; overflow:auto; cursor:grab; }
+  #canvas-wrap.grabbing{cursor:grabbing;}
+  #canvas{ position:relative; width:3200px; height:1950px; }
+  svg#edges{position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; overflow:visible;}
+
+  .zone{ position:absolute; border-radius:16px; border:1px dashed var(--border-dim); background: rgba(255,255,255,0.012); }
+  .zone-label{ position:absolute; top:10px; left:18px; font-size:11px; letter-spacing:2.5px; text-transform:uppercase; color:var(--text-dim); font-weight:600; }
+
+  .node{ position:absolute; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; cursor:pointer;
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; z-index:5; padding:8px 10px; }
+  .node .label{font-size:13px; font-weight:600; line-height:1.25; color:var(--text);}
+  .node .sub{font-size:9.5px; color:var(--text-dim); margin-top:2px; font-family:'JetBrains Mono',monospace;}
+  .node:hover, .node.pinned{ z-index:20; transform:scale(1.08); }
+
+  .shape-rect{ background:linear-gradient(160deg, rgba(255,255,255,0.045), rgba(255,255,255,0.01)); border:1.5px solid var(--c); border-radius:9px; }
+  .shape-rect:hover, .shape-rect.pinned{ box-shadow: 0 0 22px var(--c), inset 0 0 18px rgba(255,255,255,0.05); }
+
+  .shape-diamond .diamond-inner{ width:100%; height:100%; position:absolute; top:0; left:0;
+    background:linear-gradient(160deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01)); border:1.5px solid var(--c); transform:rotate(45deg); border-radius:8px; }
+  .shape-diamond{ background:none; }
+  .shape-diamond .content{position:relative; z-index:2;}
+  .shape-diamond:hover .diamond-inner, .shape-diamond.pinned .diamond-inner{ box-shadow:0 0 22px var(--c); }
+
+  .shape-cylinder{ background:none; border:none; padding-top:16px; }
+  .shape-cylinder .cyl-top{ position:absolute; top:0; left:8%; width:84%; height:16px; border-radius:50%; border:1.5px solid var(--c); background:rgba(255,255,255,0.04); }
+  .shape-cylinder .cyl-body{ position:absolute; top:8px; left:8%; width:84%; bottom:8px; border-left:1.5px solid var(--c); border-right:1.5px solid var(--c);
+    background:linear-gradient(160deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)); }
+  .shape-cylinder .cyl-bottom{ position:absolute; bottom:0; left:8%; width:84%; height:16px; border-radius:50%; border:1.5px solid var(--c); border-top:none; background:rgba(0,0,0,0.2); }
+  .shape-cylinder:hover .cyl-top, .shape-cylinder.pinned .cyl-top{box-shadow:0 0 18px var(--c);}
+  .shape-cylinder .content{position:relative; z-index:2; margin-top:6px;}
+
+  .shape-cloud{ background:none; border:none; }
+  .shape-cloud svg.cloud-svg{position:absolute; top:0; left:0; width:100%; height:100%;}
+  .shape-cloud .content{position:relative; z-index:2;}
+  .shape-cloud:hover svg.cloud-svg path, .shape-cloud.pinned svg.cloud-svg path{ filter:drop-shadow(0 0 12px var(--c)); }
+
+  .shape-actor{ border-radius:50%; border:2px solid var(--c); background:radial-gradient(circle, rgba(255,255,255,0.08), rgba(255,255,255,0.01)); }
+  .shape-actor:hover, .shape-actor.pinned{box-shadow:0 0 24px var(--c);}
+
+  #sidebar{ position:fixed; top:74px; right:0; width:440px; bottom:0; background:#080b10; border-left:1px solid var(--border-dim);
+    box-shadow:-30px 0 60px rgba(0,0,0,0.6); transform: translateX(460px); transition: transform .28s cubic-bezier(.2,.8,.2,1);
+    will-change: transform; isolation: isolate; z-index:100; overflow-y:auto; overflow-x:hidden; padding:26px 26px 60px 26px; }
+  #sidebar.open{transform: translateX(0);}
+  #sidebar::-webkit-scrollbar{width:6px;}
+  #sidebar::-webkit-scrollbar-thumb{background:var(--border-dim); border-radius:3px;}
+  #sidebar h2{font-size:19px; margin-bottom:2px;}
+  #sidebar .sb-badge{ display:inline-block; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; padding:3px 9px; border-radius:20px; margin:10px 0 18px 0; font-weight:700; border:1px solid var(--c); color:var(--c); }
+  #sidebar .sb-file{font-size:11px; color:var(--text-mono); margin-bottom:20px; word-break:break-all;}
+  #sidebar h3{ font-size:11px; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim); margin:22px 0 8px 0; padding-bottom:6px; border-bottom:1px solid var(--border-dim); }
+  #sidebar p, #sidebar li{font-size:13px; line-height:1.6; color:#c9dbe8; margin-bottom:8px;}
+  #sidebar ul{padding-left:18px;}
+  #sidebar .pbrow{margin-bottom:10px;}
+  #sidebar .pbrow b{color:var(--cyan); font-size:11px; letter-spacing:1px;}
+  #sidebar-close{ position:absolute; top:20px; right:20px; width:28px; height:28px; border-radius:50%; border:1px solid var(--border-dim); background:transparent; color:var(--text-dim); cursor:pointer; font-size:15px; display:flex; align-items:center; justify-content:center; }
+  #sidebar-close:hover{color:var(--text); border-color:var(--text);}
+  #sidebar-empty{color:var(--text-dim); font-size:13px; line-height:1.7; padding-top:40px;}
+
+  #controls{ position:fixed; bottom:20px; left:24px; z-index:40; display:flex; gap:8px; }
+  #controls button{ background:var(--panel); border:1px solid var(--border-dim); color:var(--text-dim); font-family:'JetBrains Mono',monospace; font-size:11px; padding:8px 12px; border-radius:6px; cursor:pointer; }
+  #controls button:hover{color:var(--cyan); border-color:var(--cyan);}
+  #hint{ position:fixed; bottom:20px; right:24px; z-index:40; font-size:11px; color:var(--text-dim); font-family:'JetBrains Mono',monospace; max-width:340px; text-align:right; line-height:1.5; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="title">
+    <h1>Lang<span>Graph</span> — Architecture Audit</h1>
+    <div class="meta citation">langgraph 1.2.9 · checkpoint 4.1.1 · prebuilt 1.1.0 · commit 55ec2f21 · citation-only, source-verified</div>
+  </div>
+  <div id="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:var(--cyan)"></span>core loop</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--green)"></span>thread-scoped persistence</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--amber)"></span>cross-thread persistence</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--magenta)"></span>external network</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--violet)"></span>graph delegation</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--red)"></span>confirmed privacy risk</div>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+  <div id="canvas">
+    <svg id="edges"></svg>
+  </div>
+</div>
+
+<div id="sidebar">
+  <button id="sidebar-close">✕</button>
+  <div id="sidebar-content">
+    <div id="sidebar-empty">Hover or click any component to see its exact architectural role, data flow, and source citations from the audit. This diagram contains nothing that isn't directly traceable to <span class="mono">github.com/langchain-ai/langgraph</span> at commit <span class="mono">55ec2f21</span>.</div>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="zoom-out">− zoom</button>
+  <button id="zoom-reset">reset</button>
+  <button id="zoom-in">+ zoom</button>
+</div>
+<div id="hint">🖱 click and hold anywhere on the canvas, then drag to explore · scroll wheel also pans · hover a node for details · click a node to pin the sidebar open</div>
+
+<script>
+const COLORS = { cyan:'#00f0ff', green:'#39ff88', magenta:'#ff2ec4', red:'#ff3b3b', amber:'#ffd23f', violet:'#b967ff' };
+
+const NODES = [
+  { id:'user', label:'User / Caller', sub:'.invoke() / .stream()', shape:'actor', color:'cyan', x:60, y:420, w:120, h:120,
+    file:'', identity:'The application code that invokes a compiled graph via .invoke()/.stream()/.astream().',
+    io:[], boundaries:null, persistence:null, delegation:null },
+
+  { id:'stategraph', label:'StateGraph / Pregel', sub:'graph/state.py:130 · pregel/main.py:450', shape:'rect', color:'cyan', x:320, y:340, w:280, h:150,
+    file:'graph/state.py:130',
+    identity:'"A graph whose nodes communicate by reading and writing to a shared state." CompiledStateGraph subclasses the execution engine Pregel — "Pregel manages the runtime behavior for LangGraph applications."',
+    io:['stream()/astream() — pregel/main.py:2655-2672 — the real entrypoint. invoke() has NO independent execution path — it is implemented entirely on top of stream().',
+        'get_state(config) → StateSnapshot — pregel/main.py:1392-1434 — reads thread_id out of config and calls checkpointer.get_tuple(config).',
+        'get_store() (config.py:32-37) — lets node code read/write the shared BaseStore via Python contextvars.'],
+    boundaries:{who:'The Pregel execution loop itself decides to persist a checkpoint, unconditionally at the end of each step (subject to durability mode) — not the application developer per-call.',
+                what:'The ENTIRE channel snapshot (every declared state key\'s current value) — create_checkpoint() output — plus per-node write payloads.',
+                how:'create_checkpoint() (pregel/_checkpoint.py:149-214) reads every channel\'s .checkpoint()/.get() value into a dict.',
+                when:'Gated by self.durability != "exit" (pregel/_loop.py:466) — meaning intermediate, mid-run state can be persisted, not just final.'},
+    persistence:'Does not implement storage itself — calls out to whatever BaseCheckpointSaver (thread-scoped) and BaseStore (cross-thread) are passed to .compile(). "A developer who does not explicitly pass checkpointer=False to a subgraph\'s .compile() call gets SILENT INHERITANCE of the parent\'s persistence target."',
+    delegation:'When used as a node inside a parent graph (subgraph-as-node), see Multi-Agent/Subgraph Composition for the exact state-filtering mechanism.' },
+
+  { id:'command', label:'Command', sub:'types.py:758-784', shape:'diamond', color:'violet', x:340, y:600, w:170, h:170,
+    file:'types.py:758-784',
+    identity:'Frozen, slotted, keyword-only dataclass: "One or more commands to update the graph\'s state and send messages to nodes." graph field supports None (current graph) or Command.PARENT (closest parent graph).',
+    io:['_update_as_tuples() — types.py:793-806 — converts self.update into (channel, value) pairs.',
+        'interrupt(value) — types.py:811,900-934 — the paired primitive; reads previously-supplied Command(resume=...) values.'],
+    boundaries:{who:'A node function, by explicitly constructing and returning Command(graph=Command.PARENT, update=..., goto=...). "No implicit/automatic mechanism does this — it\'s an opt-in call the node author writes."',
+                what:'Exactly the update dict (or annotated-object) and goto targets placed into the Command object by that node\'s author — nothing else.',
+                how:'ParentCommand (a GraphBubbleUp exception) is caught in the per-task retry driver. If the command\'s graph names the current namespace it\'s applied locally; otherwise re-namespaced ONE LEVEL UP and re-raised — "a deliberate, code-enforced level-by-level ascent, not an instant top-level jump."',
+                when:'Only at the moment a node\'s return value is processed by its ChannelWrite writer — synchronously as part of normal step execution.'},
+    persistence:'Command(resume=...) values are persisted as pending writes on a reserved RESUME channel via checkpointer.put_writes — piggybacks entirely on the checkpointer, no separate persistence of its own.',
+    delegation:'This IS the explicit, code-level mechanism by which a subgraph can push data upward into a parent graph\'s state — distinct from, and more surgical than, the default subgraph-as-node schema-intersection sharing.' },
+
+  { id:'checkpointer', label:'BaseCheckpointSaver', sub:'checkpoint/base/__init__.py:176 · Sqlite / Postgres', shape:'cylinder', color:'green', x:700, y:180, w:210, h:140,
+    file:'checkpoint/base/__init__.py:176',
+    identity:'"The thread_id is the primary key used to store and retrieve checkpoints. Without it, the checkpointer cannot save state, resume from interrupts, or enable time-travel debugging."',
+    io:['put(config, checkpoint, metadata, new_versions) — base/__init__.py:277-283.',
+        'get_tuple(config) → CheckpointTuple — base/__init__.py:239.',
+        'delete_thread(thread_id) — base/__init__.py:320-323.'],
+    boundaries:{who:'The Pregel execution loop, automatically, once per step — infrastructure-level persistence, not an explicit application call.',
+                what:'The full Checkpoint (all channel values) plus CheckpointMetadata, and separately the raw per-task writes payload.',
+                how:'Serialized via JsonPlusSerializer.dumps_typed before being written as a BLOB/JSONB column. Security warning in the serializer\'s own docstring: "It should not be used on untrusted python objects. If an attacker can write directly to your checkpoint database, they may be able to trigger code execution when data is deserialized."',
+                when:'At each step boundary, subject to durability mode.'},
+    persistence:'PROOF OF WITHIN-THREAD SCOPING: thread_id is the LEADING COLUMN of every composite PRIMARY KEY in both SQLite and Postgres backends. "No read or write path in either concrete checkpointer implementation can access or return data from more than one thread_id in a single unfiltered query — enforced at the data-model level, not just by convention."',
+    delegation:'N/A — passive storage backend, consumed by StateGraph/Pregel and Command.' },
+
+  { id:'store', label:'BaseStore', sub:'store/base/__init__.py:700 · InMemory / Postgres', shape:'cylinder', color:'amber', x:700, y:400, w:210, h:140,
+    file:'store/base/__init__.py:700',
+    identity:'"Stores enable persistence and memory that can be shared across threads, scoped to user IDs, assistant IDs, or other arbitrary namespaces." NO method signature anywhere on BaseStore takes a thread_id parameter.',
+    io:['put(namespace: tuple, key, value, ...) — base/__init__.py:848-856.',
+        'get(namespace, key) / search(namespace_prefix, query=...) — base/__init__.py:748-781.'],
+    boundaries:{who:'Any node function or tool that explicitly calls store.put(...)/get_store().put(...) — a developer-written call, not automatic.',
+                what:'An arbitrary dict value under a caller-chosen (namespace_tuple, key) — e.g. (user_id, "memories").',
+                how:'No transformation beyond optional field-level embedding for semantic search. _validate_namespace has "NO thread-based logic of any kind."',
+                when:'Synchronously, whenever application/tool code calls put/get/search — not tied to any step-boundary the way checkpointing is.'},
+    persistence:'⚠ PROOF OF CROSS-THREAD SHARING: real, executable test code confirms store.put(("user_123","memories"),"1",{...}) then retrieval by a DIFFERENT caller. Direct contrast with checkpointer: zero occurrences of "thread_id" anywhere in the store packages (grep-verified). PRIMARY KEY (prefix, key) only — "proving namespace-scoped data in the store is retrievable independent of which thread_id originally wrote it."',
+    delegation:'N/A — passive storage backend, consumed via get_store() or direct injection.' },
+
+  { id:'toolnode', label:'ToolNode', sub:'prebuilt/tool_node.py:622', shape:'rect', color:'red', x:1080, y:340, w:220, h:150, rightEdge:true,
+    file:'prebuilt/tool_node.py:622',
+    identity:'Executes tool calls requested by an upstream LLM message and returns ToolMessage/Command results back into graph state.',
+    io:['_func/_afunc(input, config, runtime) — tool_node.py:793-798,828-833 — the real entrypoints.',
+        '_extract_state (tool_node.py:1281-1313) — retrieves the FULL parent state dict, exposed as ToolRuntime.state and to bare InjectedState() arguments.'],
+    boundaries:{who:'create_react_agent\'s should_continue routing (chat_agent_executor.py:830-859), automatically, whenever the LLM\'s last message contains tool calls — no per-call developer decision.',
+                what:'⚠ The ENTIRE graph state object (all messages, all other state keys) is packaged into ToolCallWithContext["state"] and sent alongside EACH INDIVIDUAL tool call, even though the model only supplied arguments for that one call.',
+                how:'"No filtering/minimization — _extract_state returns input[\'state\'] unmodified." ToolRuntime.state is documented simply as "The current graph state." msg_content_output converts tool return values via json.dumps/str() — "no truncation or size-limiting exists anywhere in this file" (grep-confirmed).',
+                when:'On every tool-call dispatch in the default v2 execution path (default version="v2").'},
+    persistence:'Not a persistence component itself — outputs become part of graph state and subject to checkpointer/store via the normal write path.',
+    delegation:'ToolNode is the delegation target from the agent node to individual tool executions. Secondary finding: full exception repr() surfaced to the model by default on tool errors, though injected system args (state/store/runtime) ARE explicitly stripped first via _filter_validation_errors — a protective control worth noting alongside the more permissive default.' },
+
+  { id:'multiagent', label:'Multi-Agent / Subgraph', sub:'no named supervisor/network/hierarchical exists', shape:'rect', color:'red', x:700, y:660, w:230, h:170,
+    file:'graph/state.py:896-907',
+    identity:'⚠ SURPRISING FINDING: despite being widely described in blogs/talks as first-class patterns, "supervisor," "network," and "hierarchical" DO NOT EXIST as named classes/functions/modules anywhere in libs/langgraph or libs/prebuilt source. Only 2 grep hits, both code COMMENTS. The actual mechanism is generic subgraph-as-node composition.',
+    io:['find_subgraph_pregel (pregel/_utils.py:47-58) — purely for introspection/namespacing; a subgraph node is called via the standard Runnable.invoke() interface like any other node.'],
+    boundaries:{who:'The graph author, at add_node() call time — by NOT specifying input_schema=, they opt into full-parent-state sharing with any subgraph node by default.',
+                what:'⚠ The parent\'s ENTIRE declared state schema (all channels), by default — narrowed only if the author explicitly passes input_schema= to add_node.',
+                how:'Two independent, generic, name-matching schema-intersection filters — no subgraph-specific privacy/isolation logic exists beyond ordinary schema declaration. Send(node,arg) and Command(graph=Command.PARENT) are the two primitives giving precise, opt-in control instead.',
+                when:'On every subgraph-node invocation (_proc_input, called once per task per superstep).'},
+    persistence:'Each subgraph invocation gets a distinct checkpoint namespace (checkpoint_ns = parent_ns + NS_SEP + name) — how internal subgraph state stays isolated even though input/output pass through the shared filters.',
+    delegation:'⚠ SURPRISING FINDING: default subgraph state sharing is MAXIMAL, not minimal. A commonly assumed mental model is that subgraphs receive only an explicitly-passed narrow slice ("message passing" between isolated agents) — the source shows the OPPOSITE default.' },
+
+  { id:'channels', label:'Channels & Reducers', sub:'channels/last_value.py · channels/binop.py', shape:'rect', color:'cyan', x:60, y:660, w:210, h:150,
+    file:'channels/last_value.py',
+    identity:'BaseChannel and concrete subclasses LastValue and BinaryOperatorAggregate implement the actual state-merge semantics referenced throughout StateGraph, Command, and Multi-Agent.',
+    io:['LastValue.update — last_value.py:56-67 — strict single-writer-per-step; raises InvalidUpdateError on concurrent writes to an un-annotated key.',
+        'add_messages (graph/message.py:61-90) — the canonical chat-state reducer.'],
+    boundaries:null,
+    persistence:'⚠ "All historical message content accumulates in state (and hence in checkpoints) UNLESS explicitly removed by ID — no automatic pruning/truncation exists in this reducer." Every prior user/assistant/tool message remains in channel_values["messages"] and is re-persisted into EVERY subsequent checkpoint.',
+    delegation:null },
+
+  { id:'ext_llm', label:'External LLM Provider', sub:'model call from the "agent" node', shape:'cloud', color:'magenta', x:1080, y:120, w:220, h:120, rightEdge:true,
+    file:'prebuilt/chat_agent_executor.py:636-658 (model binding)',
+    identity:'The model provider LangGraph\'s "agent" node calls via its bound chat model — OpenAI, Anthropic, or whichever provider the application configures. Not part of LangGraph itself; this is the external endpoint the model-binding library sends requests to.',
+    io:['Receives the call triggered by _get_model_input_state (chat_agent_executor.py:636-658).', 'Returns an AIMessage, including any tool_calls, consumed by the routing logic.'],
+    boundaries:{who:'The "agent" node\'s model invocation — automatic on every turn, no per-call developer decision.',
+                what:'⚠ The entire unfiltered state["messages"] history — every prior user, assistant, and tool message — passed on every single turn by default, unless a pre_model_hook is configured to trim it.',
+                how:'Whatever HTTP/SDK transport the bound chat model library uses — outside LangGraph\'s own source tree.',
+                when:'Every turn where the "agent" node runs — i.e., continuously throughout a running graph.'},
+    persistence:'Outside the audited repo\'s control — whatever retention policy the configured provider itself applies.',
+    delegation:null },
+];
+
+const MARGIN_X = 140, MARGIN_Y = 100;
+NODES.forEach(n => { n.x += MARGIN_X; n.y += MARGIN_Y; });
+
+const EDGES = [
+  { from:'user', to:'stategraph', label:'.invoke() / .stream() call', color:'cyan', cite:'pregel/main.py:2655-2672, 3836-3851' },
+  { from:'stategraph', to:'checkpointer', label:'full channel snapshot via create_checkpoint()', color:'green', cite:'pregel/_checkpoint.py:149-214' },
+  { from:'checkpointer', to:'stategraph', label:'get_tuple() → full CheckpointTuple for one thread_id', color:'green', cite:'pregel/main.py:1392-1434' },
+  { from:'stategraph', to:'store', label:'explicit store.put(namespace, key, value)', color:'amber', cite:'store/base/__init__.py:848-927' },
+  { from:'store', to:'stategraph', label:'⚠ search/get → namespace match, ANY thread\'s data', color:'amber', cite:'store/memory/__init__.py:238-266' },
+  { from:'command', to:'stategraph', label:'ParentCommand — re-namespaced one level at a time', color:'violet', cite:'pregel/_retry.py:613-631' },
+  { from:'stategraph', to:'ext_llm', label:'⚠ full unfiltered state["messages"] history, every turn', color:'red', cite:'prebuilt/chat_agent_executor.py:636-658' },
+  { from:'ext_llm', to:'stategraph', label:'AIMessage.tool_calls', color:'magenta', cite:'chat_agent_executor.py:849-859' },
+  { from:'stategraph', to:'toolnode', label:'⚠ Send() — ENTIRE graph state attached per tool call', color:'red', cite:'tool_node.py:1296-1297' },
+  { from:'toolnode', to:'channels', label:'⚠ tool output — json.dumps/str(), NO truncation', color:'red', cite:'tool_node.py:309-336' },
+  { from:'stategraph', to:'multiagent', label:'⚠ parent\'s ENTIRE state schema by default', color:'red', cite:'graph/state.py:896-907' },
+  { from:'multiagent', to:'stategraph', label:'output filtered to parent\'s output_keys only', color:'cyan', cite:'graph/state.py:1443-1479' },
+  { from:'channels', to:'checkpointer', label:'channel.update() result → persisted every step', color:'green', cite:'pregel/_algo.py:294-323' },
+];
+
+const svg = document.getElementById('edges');
+const canvas = document.getElementById('canvas');
+const NS = 'http://www.w3.org/2000/svg';
+
+function nodeCenter(n){ return { x:n.x + n.w/2, y:n.y + n.h/2 }; }
+function nodeById(id){ return NODES.find(n=>n.id===id); }
+function edgeMarkerId(color){ return 'arrow-' + color.replace('#',''); }
+
+const defs = document.createElementNS(NS,'defs');
+const uniqueColors = [...new Set(EDGES.map(e=>COLORS[e.color]))];
+uniqueColors.forEach(hex=>{
+  const marker = document.createElementNS(NS,'marker');
+  marker.setAttribute('id', 'arrow-'+hex.replace('#',''));
+  marker.setAttribute('viewBox','0 0 10 10');
+  marker.setAttribute('refX','8'); marker.setAttribute('refY','5');
+  marker.setAttribute('markerWidth','7'); marker.setAttribute('markerHeight','7');
+  marker.setAttribute('orient','auto-start-reverse');
+  const path = document.createElementNS(NS,'path');
+  path.setAttribute('d','M 0 0 L 10 5 L 0 10 z');
+  path.setAttribute('fill', hex);
+  marker.appendChild(path);
+  defs.appendChild(marker);
+});
+svg.appendChild(defs);
+
+function pointOnRectEdge(node, towardsX, towardsY){
+  const cx = node.x + node.w/2, cy = node.y + node.h/2;
+  const dx = towardsX - cx, dy = towardsY - cy;
+  if (dx === 0 && dy === 0) return {x:cx, y:cy};
+  const hw = node.w/2, hh = node.h/2;
+  const scaleX = hw / Math.abs(dx || 1e-6);
+  const scaleY = hh / Math.abs(dy || 1e-6);
+  const scale = Math.min(scaleX, scaleY);
+  return { x: cx + dx*scale, y: cy + dy*scale };
+}
+
+EDGES.forEach((e, idx) => {
+  const a = nodeById(e.from), b = nodeById(e.to);
+  if(!a || !b){ console.warn('missing node for edge', e); return; }
+  const ac = nodeCenter(a), bc = nodeCenter(b);
+  const p1 = pointOnRectEdge(a, bc.x, bc.y);
+  const p2 = pointOnRectEdge(b, ac.x, ac.y);
+  const hex = COLORS[e.color];
+  const path = document.createElementNS(NS,'path');
+  const midx = (p1.x+p2.x)/2, midy = (p1.y+p2.y)/2;
+  path.setAttribute('d', `M ${p1.x} ${p1.y} Q ${midx} ${midy} ${p2.x} ${p2.y}`);
+  path.setAttribute('fill','none');
+  path.setAttribute('stroke', hex);
+  path.setAttribute('stroke-width', e.color==='red' ? 2.2 : 1.4);
+  path.setAttribute('stroke-dasharray', e.color==='red' ? '2 7' : '4 8');
+  path.setAttribute('opacity', 0.65);
+  path.setAttribute('marker-end', `url(#${edgeMarkerId(hex)})`);
+  path.classList.add('flow-edge');
+  path.style.animation = `dash ${e.color==='red' ? 0.7 : 1.6}s linear infinite`;
+  path.dataset.edgeIdx = idx;
+  svg.appendChild(path);
+});
+
+const styleSheet = document.createElement('style');
+styleSheet.textContent = `@keyframes dash { to { stroke-dashoffset: -100; } }`;
+document.head.appendChild(styleSheet);
+
+const zones = [
+  { x:20, y:300, w:230, h:280, label:'Entry' },
+  { x:300, y:300, w:320, h:520, label:'Core Runtime' },
+  { x:660, y:140, w:280, h:440, label:'Persistence (contrast: thread vs cross-thread)' },
+  { x:660, y:620, w:290, h:250, label:'Delegation / Subgraph Composition' },
+  { x:1040, y:80, w:280, h:460, label:'Boundary Components' },
+  { x:20, y:620, w:270, h:250, label:'State Merge Mechanism' },
+];
+zones.forEach(z=>{
+  const div = document.createElement('div');
+  div.className = 'zone';
+  div.style.left = (z.x+MARGIN_X)+'px'; div.style.top = (z.y+MARGIN_Y)+'px';
+  div.style.width = z.w+'px'; div.style.height = z.h+'px';
+  const lbl = document.createElement('div');
+  lbl.className = 'zone-label'; lbl.textContent = z.label;
+  div.appendChild(lbl);
+  canvas.insertBefore(div, svg.nextSibling);
+});
+
+NODES.forEach(n=>{
+  const div = document.createElement('div');
+  div.className = `node shape-${n.shape}`;
+  div.style.left = n.x+'px'; div.style.top = n.y+'px';
+  div.style.width = n.w+'px'; div.style.height = n.h+'px';
+  div.style.setProperty('--c', COLORS[n.color]);
+  div.dataset.id = n.id;
+  if(n.rightEdge){ div.style.transformOrigin = 'right center'; }
+
+  if(n.shape === 'cylinder'){
+    div.innerHTML = `<div class="cyl-top"></div><div class="cyl-body"></div><div class="cyl-bottom"></div>
+      <div class="content"><div class="label">${n.label}</div><div class="sub">${n.sub||''}</div></div>`;
+  } else if(n.shape === 'diamond'){
+    div.innerHTML = `<div class="diamond-inner"></div>
+      <div class="content"><div class="label">${n.label}</div><div class="sub">${n.sub||''}</div></div>`;
+  } else if(n.shape === 'cloud'){
+    div.innerHTML = `<svg class="cloud-svg" viewBox="0 0 200 120" preserveAspectRatio="none">
+        <path d="M40,90 Q10,90 10,65 Q10,45 32,42 Q34,20 60,18 Q82,2 105,15 Q130,10 140,32 Q165,32 168,55 Q190,58 188,80 Q186,98 160,98 L45,98 Z"
+              fill="rgba(255,255,255,0.03)" stroke="${COLORS[n.color]}" stroke-width="2"/>
+      </svg>
+      <div class="content"><div class="label">${n.label}</div><div class="sub">${n.sub||''}</div></div>`;
+  } else {
+    div.innerHTML = `<div class="content"><div class="label">${n.label}</div><div class="sub">${n.sub||''}</div></div>`;
+  }
+
+  div.addEventListener('mouseenter', ()=>{ if(!pinned) showSidebar(n); highlightEdges(n.id, true); });
+  div.addEventListener('mouseleave', ()=>{ if(!pinned) hideIfNotPinned(); highlightEdges(n.id, false); });
+  div.addEventListener('click', ()=>{
+    if(pinnedId === n.id){ pinned=false; pinnedId=null; div.classList.remove('pinned'); hideSidebar(); }
+    else {
+      document.querySelectorAll('.node.pinned').forEach(el=>el.classList.remove('pinned'));
+      pinned=true; pinnedId = n.id; div.classList.add('pinned'); showSidebar(n);
+    }
+  });
+
+  canvas.appendChild(div);
+});
+
+function highlightEdges(id, on){
+  document.querySelectorAll('.flow-edge').forEach(p=>{
+    const idx = +p.dataset.edgeIdx;
+    const e = EDGES[idx];
+    if(e.from===id || e.to===id){
+      p.style.opacity = on ? '1' : '0.65';
+      p.style.strokeWidth = on ? '3' : (e.color==='red'?'2.2':'1.4');
+    }
+  });
+}
+
+let pinned = false, pinnedId = null;
+const sidebar = document.getElementById('sidebar');
+const sidebarContent = document.getElementById('sidebar-content');
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+function showSidebar(n){
+  const hex = COLORS[n.color];
+  let html = `<h2>${esc(n.label)}</h2>
+    <div class="sb-badge" style="--c:${hex}; border-color:${hex}; color:${hex};">${esc(n.color)}</div>`;
+  if(n.file) html += `<div class="sb-file citation">${esc(n.file)}</div>`;
+  if(n.identity) html += `<h3>Identity</h3><p>${esc(n.identity)}</p>`;
+  if(n.io && n.io.length){
+    html += `<h3>Inputs / Outputs</h3><ul>`;
+    n.io.forEach(x=> html += `<li class="citation" style="font-size:12px;">${esc(x)}</li>`);
+    html += `</ul>`;
+  }
+  if(n.boundaries){
+    html += `<h3>Privacy Boundary</h3>`;
+    html += `<div class="pbrow"><b>WHO</b><p>${esc(n.boundaries.who)}</p></div>`;
+    html += `<div class="pbrow"><b>WHAT</b><p>${esc(n.boundaries.what)}</p></div>`;
+    html += `<div class="pbrow"><b>HOW</b><p>${esc(n.boundaries.how)}</p></div>`;
+    html += `<div class="pbrow"><b>WHEN</b><p>${esc(n.boundaries.when)}</p></div>`;
+  }
+  if(n.persistence) html += `<h3>Persistence</h3><p>${esc(n.persistence)}</p>`;
+  if(n.delegation) html += `<h3>Delegation</h3><p>${esc(n.delegation)}</p>`;
+  sidebarContent.innerHTML = html;
+  sidebar.classList.add('open');
+}
+function hideIfNotPinned(){ if(!pinned) sidebar.classList.remove('open'); }
+function hideSidebar(){ sidebar.classList.remove('open'); }
+
+document.getElementById('sidebar-close').addEventListener('click', ()=>{
+  pinned=false; pinnedId=null;
+  document.querySelectorAll('.node.pinned').forEach(el=>el.classList.remove('pinned'));
+  hideSidebar();
+});
+
+const wrap = document.getElementById('canvas-wrap');
+let isDown=false, startX, startY, scrollLeft, scrollTop;
+wrap.addEventListener('mousedown', (e)=>{
+  if(e.target.closest('.node')) return;
+  isDown=true; wrap.classList.add('grabbing');
+  startX = e.pageX; startY = e.pageY; scrollLeft = wrap.scrollLeft; scrollTop = wrap.scrollTop;
+});
+window.addEventListener('mouseup', ()=>{ isDown=false; wrap.classList.remove('grabbing'); });
+window.addEventListener('mousemove', (e)=>{
+  if(!isDown) return;
+  wrap.scrollLeft = scrollLeft - (e.pageX - startX);
+  wrap.scrollTop = scrollTop - (e.pageY - startY);
+});
+
+let zoom = 1;
+function applyZoom(){ canvas.style.transform = `scale(${zoom})`; canvas.style.transformOrigin = '0 0'; }
+document.getElementById('zoom-in').addEventListener('click', ()=>{ zoom = Math.min(1.4, zoom+0.1); applyZoom(); });
+document.getElementById('zoom-out').addEventListener('click', ()=>{ zoom = Math.max(0.45, zoom-0.1); applyZoom(); });
+document.getElementById('zoom-reset').addEventListener('click', ()=>{ zoom = 0.85; applyZoom(); wrap.scrollLeft=0; wrap.scrollTop=0; });
+
+zoom = 0.85; applyZoom();
+</script>
+</body>
+</html>

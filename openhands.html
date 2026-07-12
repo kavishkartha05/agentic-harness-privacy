@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenHands — Architecture Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#05070a; --bg2:#0a0e16; --panel:#0d1420; --grid:#101826;
+    --cyan:#00f0ff; --green:#39ff88; --magenta:#ff2ec4; --red:#ff3b3b; --amber:#ffd23f; --violet:#b967ff;
+    --text:#e8f6ff; --text-dim:#7f93a8; --text-mono:#9fd4e0;
+    --border-dim: rgba(232,246,255,0.12);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    background:var(--bg); color:var(--text);
+    font-family:'Inter',sans-serif;
+    width:100%; height:100%;
+    overflow:hidden;
+  }
+  body{
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(0,240,255,0.05), transparent 40%),
+      radial-gradient(circle at 80% 80%, rgba(185,103,255,0.05), transparent 40%),
+      repeating-linear-gradient(0deg, var(--grid) 0px, var(--grid) 1px, transparent 1px, transparent 48px),
+      repeating-linear-gradient(90deg, var(--grid) 0px, var(--grid) 1px, transparent 1px, transparent 48px);
+  }
+  h1,h2,h3,.mono-label{font-family:'Space Grotesk',sans-serif;}
+  .citation, .mono{font-family:'JetBrains Mono',monospace;}
+
+  #topbar{
+    position:fixed; top:0; left:0; right:0; height:74px; z-index:50;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 28px;
+    background:linear-gradient(180deg, rgba(5,7,10,0.97), rgba(5,7,10,0.85));
+    border-bottom:1px solid var(--border-dim);
+    backdrop-filter: blur(6px);
+  }
+  #topbar .title{display:flex; align-items:baseline; gap:14px;}
+  #topbar h1{font-size:20px; font-weight:700; letter-spacing:0.5px; color:var(--text);}
+  #topbar h1 span{color:var(--cyan); text-shadow:0 0 12px rgba(0,240,255,0.6);}
+  #topbar .meta{font-size:11px; color:var(--text-dim); letter-spacing:0.5px;}
+  #legend{display:flex; gap:18px; font-size:11px; align-items:center;}
+  .legend-item{display:flex; align-items:center; gap:6px; color:var(--text-dim);}
+  .legend-dot{width:9px; height:9px; border-radius:2px;}
+
+  #canvas-wrap{
+    position:absolute; top:74px; left:0; right:0; bottom:0;
+    overflow:auto;
+    cursor:grab;
+  }
+  #canvas-wrap.grabbing{cursor:grabbing;}
+  #canvas{
+    position:relative;
+    width:3500px; height:2100px;
+  }
+  svg#edges{position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; overflow:visible;}
+
+  .zone{
+    position:absolute; border-radius:16px;
+    border:1px dashed var(--border-dim);
+    background: rgba(255,255,255,0.012);
+  }
+  .zone-label{
+    position:absolute; top:10px; left:18px;
+    font-size:11px; letter-spacing:2.5px; text-transform:uppercase;
+    color:var(--text-dim); font-weight:600;
+  }
+
+  .node{
+    position:absolute;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center;
+    cursor:pointer;
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    z-index:5;
+    padding:8px 10px;
+  }
+  .node .label{font-size:12.5px; font-weight:600; line-height:1.25; color:var(--text);}
+  .node .sub{font-size:9.5px; color:var(--text-dim); margin-top:2px; font-family:'JetBrains Mono',monospace;}
+  .node:hover, .node.pinned{ z-index:20; transform:scale(1.08); }
+
+  .shape-rect{
+    background:linear-gradient(160deg, rgba(255,255,255,0.045), rgba(255,255,255,0.01));
+    border:1.5px solid var(--c);
+    border-radius:9px;
+    box-shadow: 0 0 0px var(--c);
+  }
+  .shape-rect:hover, .shape-rect.pinned{ box-shadow: 0 0 22px var(--c), inset 0 0 18px rgba(255,255,255,0.05); border-color:var(--c); }
+
+  .shape-diamond .diamond-inner{
+    width:100%; height:100%; position:absolute; top:0; left:0;
+    background:linear-gradient(160deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
+    border:1.5px solid var(--c);
+    transform:rotate(45deg);
+    border-radius:8px;
+  }
+  .shape-diamond{ background:none; }
+  .shape-diamond .content{position:relative; z-index:2;}
+  .shape-diamond:hover .diamond-inner, .shape-diamond.pinned .diamond-inner{ box-shadow:0 0 22px var(--c); }
+
+  .shape-cylinder{
+    background:none; border:none; padding-top:16px;
+  }
+  .shape-cylinder .cyl-top{
+    position:absolute; top:0; left:8%; width:84%; height:16px; border-radius:50%;
+    border:1.5px solid var(--c); background:rgba(255,255,255,0.04);
+  }
+  .shape-cylinder .cyl-body{
+    position:absolute; top:8px; left:8%; width:84%; bottom:8px;
+    border-left:1.5px solid var(--c); border-right:1.5px solid var(--c);
+    background:linear-gradient(160deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+  }
+  .shape-cylinder .cyl-bottom{
+    position:absolute; bottom:0; left:8%; width:84%; height:16px; border-radius:50%;
+    border:1.5px solid var(--c); border-top:none; background:rgba(0,0,0,0.2);
+  }
+  .shape-cylinder:hover .cyl-top, .shape-cylinder.pinned .cyl-top{box-shadow:0 0 18px var(--c);}
+  .shape-cylinder .content{position:relative; z-index:2; margin-top:6px;}
+
+  .shape-cloud{
+    background:none; border:none;
+  }
+  .shape-cloud svg.cloud-svg{position:absolute; top:0; left:0; width:100%; height:100%;}
+  .shape-cloud .content{position:relative; z-index:2;}
+  .shape-cloud:hover svg.cloud-svg path, .shape-cloud.pinned svg.cloud-svg path{ filter:drop-shadow(0 0 12px var(--c)); }
+
+  .shape-actor{
+    border-radius:50%;
+    border:2px solid var(--c);
+    background:radial-gradient(circle, rgba(255,255,255,0.08), rgba(255,255,255,0.01));
+  }
+  .shape-actor:hover, .shape-actor.pinned{box-shadow:0 0 24px var(--c);}
+
+  #sidebar{
+    position:fixed; top:74px; right:0; width:440px; bottom:0;
+    background:#080b10;
+    border-left:1px solid var(--border-dim);
+    box-shadow:-30px 0 60px rgba(0,0,0,0.6);
+    transform: translateX(460px);
+    transition: transform .28s cubic-bezier(.2,.8,.2,1);
+    will-change: transform;
+    isolation: isolate;
+    z-index:100;
+    overflow-y:auto;
+    overflow-x:hidden;
+    padding:26px 26px 60px 26px;
+  }
+  #sidebar.open{transform: translateX(0);}
+  #sidebar::-webkit-scrollbar{width:6px;}
+  #sidebar::-webkit-scrollbar-thumb{background:var(--border-dim); border-radius:3px;}
+  #sidebar h2{font-size:19px; margin-bottom:2px; color:var(--text);}
+  #sidebar .sb-badge{
+    display:inline-block; font-size:10px; letter-spacing:1.5px; text-transform:uppercase;
+    padding:3px 9px; border-radius:20px; margin:10px 0 18px 0; font-weight:700;
+    border:1px solid var(--c); color:var(--c);
+  }
+  #sidebar .sb-file{font-size:11px; color:var(--text-mono); margin-bottom:20px; word-break:break-all;}
+  #sidebar h3{
+    font-size:11px; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim);
+    margin:22px 0 8px 0; padding-bottom:6px; border-bottom:1px solid var(--border-dim);
+  }
+  #sidebar p, #sidebar li{font-size:13px; line-height:1.6; color:#c9dbe8; margin-bottom:8px;}
+  #sidebar ul{padding-left:18px;}
+  #sidebar .pbrow{margin-bottom:10px;}
+  #sidebar .pbrow b{color:var(--cyan); font-size:11px; letter-spacing:1px;}
+  #sidebar-close{
+    position:absolute; top:20px; right:20px; width:28px; height:28px; border-radius:50%;
+    border:1px solid var(--border-dim); background:transparent; color:var(--text-dim);
+    cursor:pointer; font-size:15px; display:flex; align-items:center; justify-content:center;
+  }
+  #sidebar-close:hover{color:var(--text); border-color:var(--text);}
+  #sidebar-empty{color:var(--text-dim); font-size:13px; line-height:1.7; padding-top:40px;}
+
+  #controls{
+    position:fixed; bottom:20px; left:24px; z-index:40;
+    display:flex; gap:8px;
+  }
+  #controls button{
+    background:var(--panel); border:1px solid var(--border-dim); color:var(--text-dim);
+    font-family:'JetBrains Mono',monospace; font-size:11px; padding:8px 12px; border-radius:6px;
+    cursor:pointer;
+  }
+  #controls button:hover{color:var(--cyan); border-color:var(--cyan);}
+
+  #hint{
+    position:fixed; bottom:20px; right:24px; z-index:40;
+    font-size:11px; color:var(--text-dim); font-family:'JetBrains Mono',monospace;
+    max-width:340px; text-align:right; line-height:1.5;
+  }
+  #back-link{
+    position:fixed; top:22px; left:28px; z-index:60;
+  }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="title">
+    <h1>Open<span>Hands</span> — Architecture Audit</h1>
+    <div class="meta citation">software-agent-sdk · v1.35.0 · commit cf6c2a3a · citation-only, source-verified</div>
+  </div>
+  <div id="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:var(--cyan)"></span>core loop</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--green)"></span>persistence</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--magenta)"></span>external network</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--violet)"></span>delegation</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--amber)"></span>conditional safeguard</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--red)"></span>confirmed privacy risk</div>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+  <div id="canvas">
+    <svg id="edges"></svg>
+  </div>
+</div>
+
+<div id="sidebar">
+  <button id="sidebar-close">✕</button>
+  <div id="sidebar-content">
+    <div id="sidebar-empty">Hover or click any component to see its exact architectural role, data flow, and source citations from the audit. This diagram contains nothing that isn't directly traceable to <span class="mono">github.com/OpenHands/software-agent-sdk</span> at commit <span class="mono">cf6c2a3a</span>.</div>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="zoom-out">− zoom</button>
+  <button id="zoom-reset">reset</button>
+  <button id="zoom-in">+ zoom</button>
+</div>
+<div id="hint">🖱 click and hold anywhere on the canvas, then drag to explore · scroll wheel also pans · hover a node for details · click a node to pin the sidebar open</div>
+
+<script>
+const COLORS = { cyan:'#00f0ff', green:'#39ff88', magenta:'#ff2ec4', red:'#ff3b3b', amber:'#ffd23f', violet:'#b967ff' };
+
+const NODES = [
+  { id:'user', label:'User / Caller', sub:'SDK invocation', shape:'actor', color:'cyan', x:60, y:640, w:120, h:120,
+    file:'', identity:'The human, UI, or CLI process that hands a Message into a running conversation.',
+    io:[], boundaries:null, persistence:null, delegation:null },
+
+  { id:'localconv', label:'LocalConversation', sub:'conversation/impl/local_conversation.py:145', shape:'rect', color:'cyan', x:300, y:520, w:190, h:100,
+    file:'local_conversation.py:145',
+    identity:'Runs the agent loop in-process against a local filesystem workspace. Drives Agent.step/astep in a loop until execution_status is terminal.',
+    io:['send_message(message, sender=None) — local_conversation.py:1629-1692 — entry point for a caller to hand a Message in.',
+        'run()/arun() — local_conversation.py:1725,1898 — drives self.agent.step(self, on_event, on_token) in a loop.'],
+    boundaries:{who:'LocalConversation._default_callback (local_conversation.py:338-350) appends every event to ConversationState.',
+                what:'Every produced Event: SystemPromptEvent, ActionEvent, ObservationEvent, MessageEvent, AgentErrorEvent, TokenEvent.',
+                how:'Direct callback registration — no transformation.',
+                when:'Continuously, for the entire lifetime of the running conversation.'},
+    persistence:'Every event flows to ConversationState.append_event → EventLog (see Event System component).',
+    delegation:'DelegateExecutor spawns brand-new LocalConversation instances for sub-agents (see Subagent/Delegation).' },
+
+  { id:'state', label:'ConversationState', sub:'conversation/state.py:82', shape:'rect', color:'cyan', x:300, y:660, w:190, h:100,
+    file:'state.py:82',
+    identity:'The single source of truth for a conversation\'s execution state — agent config, execution status, confirmation policy, secret registry, event-log HEAD pointer, stats.',
+    io:['create(id, agent, workspace, persistence_dir, ...) — state.py:445-578 — resumes from BASE_STATE or creates fresh state.',
+        'append_event(event) — state.py:315-334 — single chokepoint that stamps parent_id and advances leaf_event_id.',
+        'view property — state.py:336-381 — the incrementally-maintained View used to build LLM messages.'],
+    boundaries:{who:'ConversationState.__setattr__ (state.py:581-633) auto-persists on every public-field mutation.',
+                what:'The entire Pydantic model tree: agent config, execution status, secrets, event pointer.',
+                how:'model_dump_json(exclude_none=True, context=context) — state.py:421-442.',
+                when:'On every field mutation once autosave is enabled.'},
+    persistence:'_save_base_state() writes base_state.json via FileStore. Comment at state.py:422-427: "If a cipher is configured, secrets will be encrypted. Otherwise, they will be redacted." Warning logged if secrets exist with no cipher: secrets "will be redacted and lost on restore."',
+    delegation:null },
+
+  { id:'agent', label:'Agent (AgentBase)', sub:'agent/base.py:96, agent/agent.py:353', shape:'rect', color:'cyan', x:300, y:800, w:190, h:110,
+    file:'agent/agent.py:353',
+    identity:'Stateless, config-driven object that sends the current view of events to an LLM, turns tool calls into ActionEvents, executes them, and appends resulting events back into state.',
+    io:['step(conversation, on_event, on_token) — agent.py:613-795 — called repeatedly by the conversation run loop until FINISHED.',
+        '_execute_action_event(conversation, action_event) — agent.py:1293-1349 — invoked per tool call.'],
+    boundaries:{who:'Agent.step/astep call make_llm_completion(self.llm, _messages, tools=...) — agent.py:691-697, 883-889.',
+                what:'_messages — full (possibly condensed) conversation history: system prompt, user messages, prior tool calls/results. Also full tool schemas every call.',
+                how:'Built by prepare_llm_messages(state.view, condenser=self.condenser, llm=self.llm) — agent.py:651-652.',
+                when:'Every conversation run-loop call — after every user message and every tool result — until FinishTool.'},
+    persistence:'Serialized as part of ConversationState persistence. AgentBase.verify (base.py:647-713) is the read-back compatibility check.',
+    delegation:'Agent does not spawn sub-agents directly — delegation is implemented as a TOOL that a running Agent can call.' },
+
+  { id:'condenser', label:'Condenser', sub:'context/condenser/llm_summarizing_condenser.py:38', shape:'rect', color:'amber', x:640, y:540, w:200, h:110,
+    file:'llm_summarizing_condenser.py:38',
+    identity:'When the conversation grows past a size/token budget, takes "forgotten events" and asks a SEPARATE LLM call (potentially a different model/provider) to summarize them.',
+    io:['condense(view, agent_llm=None) → View | Condensation — base.py:32-52.',
+        '_generate_condensation(forgotten_events, ...) — llm_summarizing_condenser.py:164-224.'],
+    boundaries:{who:'LLMSummarizingCondenser._generate_condensation (llm_summarizing_condenser.py:203-206) calls self.llm.completion(messages=messages).',
+                what:'event_strings — string renderings of every forgotten event: tool calls, tool outputs/observations (incl. file contents/command output), prior messages.',
+                how:'maybe_truncate(str(forgotten_event), ...) — llm_summarizing_condenser.py:189 — a string cast plus optional length truncation. "There is no redaction of secrets/PII at this step."',
+                when:'Triggered by condensation_requirement(): context-window-exceeded error, max_tokens exceeded, or len(view) > max_size (default 80).'},
+    persistence:'The Condensation event (including its summary text — a paraphrase of forgotten content) is appended to EventLog like any other event.',
+    delegation:'default_condenser(llm) is explicitly reused "so the default agent and spawned sub-agents stay in sync" — each sub-agent gets its own instance, each capable of independently calling an LLM.' },
+
+  { id:'toolexec', label:'Tool Execution Runtime', sub:'tool/tool.py:133 · terminal, file_editor', shape:'rect', color:'cyan', x:640, y:700, w:200, h:100,
+    file:'tool/tool.py:133',
+    identity:'Abstract ToolExecutor interface every concrete tool implements: __call__(action, conversation) -> Observation.',
+    io:['TerminalExecutor._build_env_exports/_export_envs (terminal/impl.py:289-358) — builds export KEY=value shell prelude before user command.',
+        'FileEditorExecutor.__call__ — no secret-masking call found (per this audit\'s reading).'],
+    boundaries:{who:'Agent._execute_action_event (agent.py:1293-1349) dispatches the validated Action to the matching ToolExecutor.',
+                what:'Full tool arguments, plus (for terminal) exported secret env vars.',
+                how:'TerminalExecutor shares secret values with the local execution environment/subprocess — "curl to an external endpoint could exfiltrate them; the SDK provides no network-egress control at this layer."',
+                when:'Every terminal-tool call whose command text matches a registered secret\'s key name (SecretRegistry.find_secrets_in_text).'},
+    persistence:'Executors don\'t write EventLog directly — return Observations wrapped into ObservationEvents by the standard path. full_output_save_dir referenced (terminal/impl.py:377-379) but NOT independently verified.',
+    delegation:'The delegate tool itself is implemented as a ToolDefinition/ToolExecutor pair (see Subagent/Delegation).' },
+
+  { id:'skills', label:'Skills System', sub:'skills/skill.py:178 · execute.py', shape:'rect', color:'red', x:640, y:860, w:200, h:120,
+    file:'skills/skill.py:178',
+    identity:'Knowledge/prompt-injection and light plugin mechanism — Markdown files (local or fetched from a public GitHub repo) parsed into Skill objects, matched via triggers, injected into the LLM prompt.',
+    io:['Skill.load(path, ...) — skill.py:354-389 — reads a file off local disk.',
+        'load_public_skills(repo_url, ref, ...) — skill.py:1204-1354 — the three source loaders merged by load_available_skills.',
+        'render_content_with_commands — execute.py:98 — scans for `!command` placeholders.'],
+    boundaries:{who:'load_public_skills, specifically update_skills_repository(repo_url, ref, cache_dir) — skill.py:1266.',
+                what:'The ENTIRE contents of https://github.com/OpenHands/extensions (default) at the configured ref, cloned to local disk.',
+                how:'"Security Warning: Commands are executed via shell with full process privileges. Only use with trusted skill sources." — execute.py:12-13. subprocess.run(command, shell=True, ...) — execute.py:66-73.',
+                when:'Whenever a skill containing `!command` syntax is rendered (trigger match or explicit invoke_skill call); repo fetch on cache expiry (60s TTL for mutable refs).'},
+    persistence:'get_skills_cache_dir() persists the cloned public-skills git repo to ~/.openhands/skills-cache/ — survives across sessions/processes.',
+    delegation:'Skill.mcp_tools lets a skill register its own MCP servers — a skill-triggered expansion of the agent\'s network-connected tool surface.' },
+
+  { id:'delegate', label:'Subagent / Delegation', sub:'tools/delegate/impl.py:33', shape:'rect', color:'violet', x:960, y:540, w:200, h:120,
+    file:'tools/delegate/impl.py:33',
+    identity:'Delegation implemented entirely as a TOOL CALL — DelegateExecutor creates brand-new LocalConversation instances (own Agent, ConversationState, EventLog), runs them to completion, returns final text as parent\'s tool observation.',
+    io:['_spawn_agents (delegate/impl.py:132-277) — builds worker_agent, sub_conversation = LocalConversation(**conv_kwargs).',
+        '_delegate_tasks (delegate/impl.py:279-409) — conversation.send_message(task, sender=parent_name); conversation.run().'],
+    boundaries:{who:'DelegateExecutor._delegate_tasks (delegate/impl.py:332) — conversation.send_message(task, sender=parent_name).',
+                what:'ONLY the task:str text the parent LLM chose to write — NOT the parent\'s prior event history, tool outputs, or secrets.',
+                how:'String pass-through as a new user Message into the freshly created, EMPTY sub-agent conversation.',
+                when:'Whenever the parent LLM emits a tool call to delegate — entirely at the parent LLM\'s discretion.'},
+    persistence:'Sub-agent conversations get their own ConversationState/EventLog under <parent_persistence_dir>/subagents/ — same base_state.json + events/ layout.',
+    delegation:'Context inheritance is STRUCTURAL not an explicit filter: _spawn_agents always constructs a brand-new LocalConversation/EventLog rather than forking the parent\'s — so no code path exists for prior parent events to become visible to the child. Only LLM config (copied), workspace path, confirmation policy (conditionally), and the task string are threaded through. sub_agent_llm = parent_llm.model_copy() — the child\'s LLM config, INCLUDING API key, is copied, not re-resolved.' },
+
+  { id:'security', label:'Security Analyzer', sub:'security/analyzer.py:15 · GraySwanAnalyzer', shape:'diamond', color:'amber', x:960, y:720, w:170, h:170,
+    file:'security/analyzer.py:15',
+    identity:'Decides per tool call (a) how risky the LLM\'s chosen action is and (b) whether that risk requires pausing for user approval. GraySwanAnalyzer outsources the risk decision to a third-party API.',
+    io:['security_risk(action) → SecurityRisk — analyzer.py:25-39.',
+        'ConfirmationPolicyBase.should_confirm(risk) — confirmation_policy.py:9-24. Concrete: AlwaysConfirm, NeverConfirm (default), ConfirmRisky.'],
+    boundaries:{who:'GraySwanAnalyzer._call_grayswan_api (grayswan/analyzer.py:186) — response = client.post(self.api_url, json=payload).',
+                what:'Up to history_limit (default 20) recent conversation events PLUS the pending action, converted to OpenAI message format — "can include prior user messages, tool calls/arguments, and tool outputs."',
+                how:'httpx.Client posts JSON to api_url (default "https://api.grayswan.ai/cygnal/monitor") — a third-party domain outside OpenHands / the user\'s own LLM provider.',
+                when:'Every tool call, if GraySwanAnalyzer is opted into via GRAYSWAN_API_KEY env var.'},
+    persistence:'SecurityRisk values stored on ActionEvent.security_risk, persisted via the standard EventLog path.',
+    delegation:'Whether a spawned sub-agent inherits security_analyzer was NOT independently confirmed — _spawn_agents sets confirmation_policy explicitly but no line sets security_analyzer (reported as an absence, not a confirmed "no").' },
+
+  { id:'secrets', label:'Secrets Registry', sub:'conversation/secret_registry.py:15', shape:'diamond', color:'red', x:960, y:920, w:170, h:170,
+    file:'secret/secrets.py, utils/pydantic_secrets.py',
+    identity:'The SDK-wide mechanism controlling whether a SecretStr field is written as "**********", Fernet ciphertext, or PLAINTEXT — the single decision point for every serialization call site.',
+    io:['resolve_expose_mode(context) — pydantic_secrets.py:24-37 — returns "plaintext" iff expose_secrets in (True,"plaintext"); "encrypted" if cipher present; else "redact" (default).',
+        'mask_secrets_in_output(text) — secret_registry.py:131-152 — replaces previously-EXPORTED secret values with "<secret-hidden>". Only catches secrets already resolved in this process.'],
+    boundaries:{who:'The call SITE decides: ConversationState._save_base_state (state.py:428, local disk = encrypted/redact) vs. RemoteConversation.__init__ (remote_conversation.py:826, network = PLAINTEXT).',
+                what:'Any SecretStr field: LLM API keys, static secret values, MCP server credentials, analyzer API keys.',
+                how:'"There is no global on/off switch — each serialization call site independently opts into redaction, encryption, or plaintext."',
+                when:'Every model_dump/model_dump_json call on a model containing SecretStr fields, anywhere in the codebase.'},
+    persistence:'Cipher.encrypt/decrypt (Fernet-based) is how secrets survive in base_state.json across sessions in encrypted form. Without a cipher: redacted (lost) on serialization.',
+    delegation:'Sub-agents share the parent\'s LLM.api_key via parent_llm.model_copy() rather than going through SecretRegistry at all — credentials copied in-memory, not re-resolved per sub-agent.' },
+
+  { id:'llm', label:'LLM (model call boundary)', sub:'llm/llm.py:205 · litellm wrapper', shape:'rect', color:'magenta', x:1300, y:480, w:210, h:110,
+    file:'llm/llm.py:205',
+    identity:'The single chokepoint through which conversation content leaves the local process to whatever model provider is configured, via the litellm library.',
+    io:['completion(messages, tools, ...) → LLMResponse — llm.py:1361-1478.',
+        '_transport_call(...) — llm.py:2100-2125 — the literal call into litellm_completion.'],
+    boundaries:{who:'LLM._transport_call/_atransport_call (llm.py:2100-2170).',
+                what:'Full formatted_messages list (system prompt, history/condensed summary, current turn, tool schemas) plus api_key/model identifier.',
+                how:'litellm-mediated HTTPS request; exact wire format depends on configured model/base_url.',
+                when:'Every Agent.step/astep call, every condenser summarization, every critic evaluation — continuously throughout a running conversation.'},
+    persistence:'Telemetry.log_llm_call (gated by log_dir) writes the FULL unredacted outgoing message list to a local JSON file per completion call — "a plaintext, on-disk transcript of every LLM interaction," separate from EventLog.',
+    delegation:null },
+
+  { id:'mcp', label:'MCP Client Boundary', sub:'mcp/client.py:18 · mcp/tool.py:50', shape:'rect', color:'magenta', x:1300, y:620, w:210, h:110,
+    file:'mcp/client.py:18',
+    identity:'Third-party (locally-spawned or remote) processes exposing their own tools — the boundary where OpenHands hands tool-call arguments (potentially incl. expanded secret values) to an external process.',
+    io:['MCPToolExecutor.__call__(action, conversation) — mcp/tool.py:120-166.',
+        'call_tool(action) — mcp/tool.py:67-118 — client.call_tool_mcp(name, arguments) via fastmcp.'],
+    boundaries:{who:'MCPToolExecutor.__call__/call_tool (mcp/tool.py:120-154, 67-118).',
+                what:'Full action.data dict, WITH secret placeholders resolved to real values before the call reaches the MCP server (mcp/tool.py:138-144).',
+                how:'expand_variable_references(...) resolves $VAR/${VAR} placeholders via SecretRegistry.get_secret_value; response text passed through mask_secrets_in_output — "image blocks pass through untouched."',
+                when:'Every time the LLM calls an MCP-backed tool mid-conversation.'},
+    persistence:'No component-specific persistence beyond standard ObservationEvent/EventLog write path.',
+    delegation:'A spawned sub-agent can be configured with an entirely different set of external MCP servers than its parent.' },
+
+  { id:'workspace', label:'Workspace (Local/Remote)', sub:'workspace/remote/base.py:50', shape:'rect', color:'magenta', x:1300, y:760, w:210, h:110,
+    file:'workspace/remote/base.py:50',
+    identity:'RemoteWorkspace is the client-side handle for executing commands, uploading/downloading files, reading git state, or fetching settings/secrets on a machine other than the calling process.',
+    io:['execute_command(command, cwd, timeout) — workspace/remote/base.py:133-154.',
+        'get_secrets(names) — workspace/remote/base.py:433 — fetches secret metadata/values over HTTP.',
+        'get_llm(profile_name) — fetches LLM profile config (potentially incl. API keys) from remote server.'],
+    boundaries:{who:'Every RemoteWorkspace method calling self.client.get/.post/.request.',
+                what:'Shell commands + output, raw file bytes, git diffs, settings and SECRET VALUES, LLM profile configuration.',
+                how:'Plain httpx HTTP requests with an API-key/bearer-token auth header (exact construction not independently opened).',
+                when:'On-demand — every tool execution targeting a RemoteWorkspace-backed conversation crosses this boundary.'},
+    persistence:'Does not persist locally itself; downloaded files written to caller-specified local path.',
+    delegation:'openhands-workspace additionally defines docker/apptainer/cloud/remote_api backends — NOT opened in this audit.' },
+
+  { id:'agentserver', label:'Agent Server', sub:'agent_server/conversation_router.py', shape:'rect', color:'red', x:1300, y:900, w:210, h:120,
+    file:'agent_server/conversation_router.py',
+    identity:'The literal server-side counterpart to RemoteConversation/RemoteWorkspace — accepts the agent config (incl. plaintext secrets), instantiates a real LocalConversation server-side, streams events back.',
+    io:['POST /conversations → start_conversation(request) → ConversationInfo — conversation_router.py:200-226.',
+        'WebSocket endpoint (sockets.py) — streams every Event the server-side conversation emits.'],
+    boundaries:{who:'start_conversation (conversation_router.py:200-226) receives the agent-config-with-plaintext-secrets payload.',
+                what:'Full StartConversationRequest body: LLM API keys, tools, MCP configs, skills, workspace path, hook config, tags, user_id.',
+                how:'Standard FastAPI JSON body parsing into StartConversationRequest.',
+                when:'On every POST /conversations request from ANY client presenting the header — "no way to distinguish the official SDK client from any other HTTP client."'},
+    persistence:'⚠ AUTH FINDING: check_session_api_key (dependencies.py:24-36) — if config.session_api_keys is EMPTY, "no authentication is enforced at all." ⚠ CORS FINDING: LocalhostCORSMiddleware unconditionally allows any request whose Origin resolves to localhost/127.0.0.1, regardless of configured allow_cors_origins.',
+    delegation:'Forwards agent_definitions/tool_module_qualnames from client payload so server-side sub-agent delegation resolves the same custom agent types the client registered.' },
+
+  { id:'remoteconv', label:'RemoteConversation', sub:'conversation/impl/remote_conversation.py:687', shape:'rect', color:'red', x:960, y:1160, w:210, h:120,
+    file:'remote_conversation.py:687',
+    identity:'A thin proxy that creates/attaches to a conversation on a remote openhands-agent-server over HTTP and streams events back over WebSocket — turns a local agent run into a networked one.',
+    io:['__init__(agent, workspace: RemoteWorkspace, ...) — remote_conversation.py:704-729.',
+        'send_message/.run — same public surface as LocalConversation, implemented as HTTP POSTs.'],
+    boundaries:{who:'RemoteConversation.__init__ (remote_conversation.py:874-879) — resp = _send_request(client, "POST", ..., json=payload).',
+                what:'⚠ agent.model_dump(mode="json", context={"expose_secrets": True}) (remote_conversation.py:826) — dumps the FULL agent config INCLUDING SECRET VALUES IN PLAINTEXT ⚠. LLM API keys, tool qualnames, subagent definitions, workspace dir, plugin sources, hook_config, tags, user_id.',
+                how:'The expose_secrets:True context flag explicitly OVERRIDES the default redaction described in SecretRegistry\'s own docstring.',
+                when:'Triggered once, synchronously, whenever calling code constructs Conversation(agent, workspace=RemoteWorkspace(...)) — before any user message is sent.'},
+    persistence:'Does NOT write to local disk for state/events — persistence entirely server-side. Local process keeps RemoteEventsList as a cache only.',
+    delegation:null },
+
+  { id:'eventlog', label:'EventLog', sub:'conversation/event_store.py:30', shape:'cylinder', color:'green', x:300, y:1200, w:180, h:130,
+    file:'event_store.py:30',
+    identity:'Concrete, file-backed, append-only, tree-structured (parent_id-linked) event store — OpenHands\' event-sourcing mechanism. One JSON file per event.',
+    io:['append(event) — event_store.py:184-223 — writes event.model_dump_json(exclude_none=True) under a process-safe file lock.',
+        '__getitem__/path_to_root — reads events back by index/id, walking parent_id chains.'],
+    boundaries:{who:'ConversationState.append_event — the only caller that writes into EventLog from the conversation layer.',
+                what:'Full Event payload — for ActionEvent: tool name, arguments, thought/reasoning; ObservationEvent: full tool output text; MessageEvent: full message (incl. images).',
+                how:'Straight Pydantic model_dump_json(exclude_none=True) — NO transformation beyond JSON serialization. "Any redaction must already have happened...before it was wrapped in an Event."',
+                when:'Every time on_event(...) is called anywhere in the agent loop — continuously.'},
+    persistence:'⚠ event-{idx}-{event_id}.json under events/, plain UTF-8 text — "no encryption at rest for event files" (encryption via Cipher applies only to base_state.json\'s secret fields). _scan_and_build_index re-scans on init — ANY later process pointed at the same persistence_dir reconstructs the FULL event history.',
+    delegation:'Sub-conversations get their OWN EventLog instance, rooted in a separate (or shared) persistence_dir.' },
+
+  { id:'filestore', label:'IO / FileStore', sub:'io/base.py:6, io/local.py:18', shape:'cylinder', color:'green', x:60, y:1200, w:180, h:130,
+    file:'io/local.py:18',
+    identity:'The single storage abstraction underneath both base_state.json and every event file. LocalFileStore = real on-disk; InMemoryFileStore = process-memory-only fallback.',
+    io:['write(path, contents) — io/local.py:61-70 — open(full_path,"w").write(contents) — literal plaintext disk write.',
+        'read(path) — io/local.py:74-87 — reads from in-process MemoryLRUCache or disk.'],
+    boundaries:{who:'Not itself a network/external boundary — only ever touches the local filesystem.',
+                what:'Whatever upstream callers choose to write here, UNENCRYPTED by default (base_state.json, per-event JSON, LLM completion logs).',
+                how:'get_full_path enforces all reads/writes stay under self.root via commonpath check — a path-traversal guard, not a privacy control.',
+                when:'Every write from ConversationState/EventLog.'},
+    persistence:'THIS IS the persistence component. InMemoryFileStore fallback logs: "No persistence_dir provided...EventLog data will not persist across requests."',
+    delegation:null },
+
+  { id:'observability', label:'Observability (Laminar)', sub:'observability/laminar.py', shape:'rect', color:'magenta', x:1300, y:1040, w:200, h:110,
+    file:'observability/laminar.py',
+    identity:'Thin wrapper around the third-party lmnr (Laminar) tracing SDK — ships structured trace data, INCLUDING by default a decorated function\'s arguments and return value unless explicitly excluded.',
+    io:['maybe_init_laminar() — laminar.py:59-115 — Laminar.initialize(base_url, ...).',
+        'observe(...) decorator — laminar.py:118-199 — wraps functions in tracing spans.'],
+    boundaries:{who:'maybe_init_laminar(), invoked at MODULE IMPORT TIME (agent.py:97) — "no explicit user consent step in this code."',
+                what:'For every @observe-decorated call NOT listing a param in ignore_inputs: that param becomes part of the exported span. MCPToolExecutor.call_tool has NO ignore_inputs specified — its action argument (potentially secret-expanded) is plausibly captured by default.',
+                how:'OpenTelemetry-protocol export (gRPC or HTTP) to base_url — defaults to hosted https://api.lmnr.ai if LMNR_BASE_URL unset.',
+                when:'Continuously for every decorated call, once enabled via any of several env vars — sticky for the process lifetime.'},
+    persistence:'No local persistence — exported directly to the configured remote OTEL/Laminar backend.',
+    delegation:'Sub-agent conversations run @observe-decorated code in the SAME process and export to the same backend.' },
+
+  { id:'ext_provider', label:'External Model Provider', sub:'OpenAI / Anthropic / Azure / Bedrock / self-hosted', shape:'cloud', color:'magenta', x:1620, y:460, w:220, h:120, rightEdge:true,
+    file:'llm/llm.py:205 (model/base_url fields)',
+    identity:'The third-party model provider OpenHands is configured to call — OpenAI, Anthropic, Azure, Bedrock, or a self-hosted proxy — selected via the LLM component\'s model and base_url fields. Not part of the OpenHands codebase; this is whatever endpoint litellm is pointed at.',
+    io:['Receives requests via LLM._transport_call/_atransport_call (llm.py:2100-2170).', 'Returns an LLMResponse (message, tool calls) consumed by Agent.step.'],
+    boundaries:{who:'Receives the litellm-mediated HTTPS request initiated by LLM._transport_call/_atransport_call.',
+                what:'The full formatted_messages list (system prompt, conversation history or condensed summary, current turn, tool schemas) plus api_key and model identifier.',
+                how:'litellm-mediated HTTPS; exact wire format depends on the configured model/base_url (OpenAI-, Anthropic-, Azure-, Bedrock-, or self-hosted-proxy-compatible).',
+                when:'Every Agent.step/astep call, every condenser summarization, every critic evaluation, every ask_agent/generate_title call.'},
+    persistence:'Outside the audited repo\'s control — whatever retention policy the configured provider itself applies.',
+    delegation:null },
+  { id:'ext_mcp_server', label:'External MCP Server', sub:'third-party, locally-spawned or remote', shape:'cloud', color:'magenta', x:1620, y:610, w:220, h:110, rightEdge:true,
+    file:'mcp/client.py:18, mcp/tool.py:50 (MCPServer config)',
+    identity:'A third-party process, locally-spawned or remote, implementing the Model Context Protocol and exposing its own tools. Configured per-agent or per-skill via MCPServer config — not part of OpenHands itself.',
+    io:['Receives calls via MCPToolExecutor.call_tool → client.call_tool_mcp (mcp/tool.py:105-107).', 'Returns tool result content, masked for known secret values before becoming an Observation.'],
+    boundaries:{who:'Receives the call from MCPToolExecutor.call_tool via fastmcp\'s underlying transport.',
+                what:'The full action.data dict — LLM-chosen tool arguments — with any secret placeholders already resolved to real values before the call is sent (mcp/tool.py:138-144).',
+                how:'fastmcp client transport — a locally-spawned subprocess or a remote URL, depending on the MCPServer config for that tool.',
+                when:'Every time the LLM calls an MCP-backed tool mid-conversation.'},
+    persistence:'Outside the audited repo\'s control — whatever the external MCP server itself does with the request.',
+    delegation:'A spawned sub-agent can be configured with an entirely different set of external MCP servers than its parent.' },
+  { id:'ext_grayswan', label:'GraySwan Cygnal API', sub:'api.grayswan.ai/cygnal/monitor', shape:'cloud', color:'red', x:1620, y:740, w:220, h:110, rightEdge:true,
+    file:'security/grayswan/analyzer.py',
+    identity:'GraySwan\'s third-party "Cygnal" safety-monitoring API — a service entirely outside OpenHands or the user\'s own LLM provider, used only when GraySwanAnalyzer is configured as the security_analyzer.',
+    io:['Receives POSTs from GraySwanAnalyzer._call_grayswan_api (grayswan/analyzer.py:186).', 'Returns a risk score consumed as SecurityRisk.'],
+    boundaries:{who:'Receives the POST from GraySwanAnalyzer._call_grayswan_api.',
+                what:'⚠ Up to history_limit (default 20) recent conversation events plus the pending action, converted to OpenAI message format — can include prior user messages, tool calls/arguments, and tool outputs.',
+                how:'httpx.Client posts JSON to api_url, default "https://api.grayswan.ai/cygnal/monitor" — a third-party domain outside OpenHands / the user\'s own LLM provider.',
+                when:'Every tool call, if GraySwanAnalyzer is opted into via the GRAYSWAN_API_KEY env var.'},
+    persistence:'Outside the audited repo\'s control — whatever GraySwan\'s own service does with submitted conversation data.',
+    delegation:null },
+  { id:'ext_laminar', label:'Laminar / OTEL Backend', sub:'default: api.lmnr.ai', shape:'cloud', color:'magenta', x:1620, y:1040, w:220, h:110, rightEdge:true,
+    file:'observability/laminar.py',
+    identity:'The hosted Laminar tracing service, or a self-hosted OTEL collector if configured, receiving distributed-tracing span data whenever observability is enabled.',
+    io:['Receives OTEL-protocol exports triggered by maybe_init_laminar() and the observe(...) decorator.'],
+    boundaries:{who:'maybe_init_laminar(), invoked at module import time — "no explicit user consent step in this code."',
+                what:'For every @observe-decorated call NOT listing a parameter in ignore_inputs: that parameter\'s value becomes part of the exported span — potentially including tool-call arguments.',
+                how:'OpenTelemetry-protocol export (gRPC or HTTP) to base_url, defaulting to https://api.lmnr.ai if LMNR_BASE_URL is unset.',
+                when:'Continuously for every decorated call, once enabled via any of several env vars — sticky for the process lifetime.'},
+    persistence:'Whether this backend itself persists received traces (e.g. Laminar\'s hosted SaaS storing them) is outside the audited repo\'s scope.',
+    delegation:null },
+  { id:'ext_skills_repo', label:'github.com/OpenHands/extensions', sub:'public skills marketplace', shape:'cloud', color:'amber', x:610, y:1040, w:230, h:100,
+    file:'skills/skill.py:1121 (PUBLIC_SKILLS_REPO default)',
+    identity:'The public GitHub repository OpenHands clones from by default when load_public_skills fetches the skills marketplace — a supply-chain trust boundary, since anything in this repo becomes executable skill content.',
+    io:['Cloned by update_skills_repository(), called from load_public_skills (skill.py:1204-1354).'],
+    boundaries:{who:'load_public_skills, specifically update_skills_repository(repo_url, ref, cache_dir) — skill.py:1266.',
+                what:'The entire contents of this repository at the configured ref (default "main", overridable via EXTENSIONS_REF env var).',
+                how:'A git clone/fetch to a local cache directory (~/.openhands/skills-cache/).',
+                when:'Whenever load_public_skills/load_available_skills(include_public=True) is called and the in-process cache (60s TTL for mutable refs) has expired.'},
+    persistence:'Cloned repository persists at ~/.openhands/skills-cache/ — survives across sessions/processes, reused rather than re-cloned on the next call with the same ref.',
+    delegation:null },
+  { id:'ext_remote_server', label:'Remote Agent Server', sub:'running same Agent/Conversation/Event/LLM code', shape:'cloud', color:'red', x:1620, y:900, w:230, h:130, rightEdge:true,
+    file:'agent_server/conversation_router.py (server-side)',
+    identity:'A separately-deployed instance of openhands-agent-server — literally the same Agent/Conversation/Event/LLM SDK code running as a server process, reachable over HTTP and WebSocket.',
+    io:['Receives POST /conversations from RemoteConversation.__init__ (remote_conversation.py:874-879).', 'Receives on-demand HTTP calls from RemoteWorkspace (execute_command, file_upload/download, get_secrets).', 'Streams events back over WebSocket to RemoteConversation.'],
+    boundaries:{who:'start_conversation (conversation_router.py:200-226) and every RemoteWorkspace method calling self.client.get/.post/.request.',
+                what:'⚠ The full StartConversationRequest body — LLM API keys, tools, MCP configs, skills, workspace path, hook config, tags, user_id — dumped with secrets in PLAINTEXT (context={"expose_secrets": True}) — plus on-demand shell commands, file bytes, and secret lookups.',
+                how:'Plain httpx HTTP requests, nominally authenticated via an X-Session-API-Key header — though this audit found that check is skipped entirely if config.session_api_keys is left empty server-side.',
+                when:'Once at conversation creation (the plaintext-secrets payload), and on-demand for every tool execution targeting a RemoteWorkspace-backed conversation.'},
+    persistence:'Runs the identical ConversationState/EventLog persistence mechanism server-side — this is not a black box, it\'s the same SDK code, just on a different machine.',
+    delegation:'Forwards agent_definitions/tool_module_qualnames from the client payload so server-side sub-agent delegation can resolve the same custom agent types the client registered.' },
+];
+
+const MARGIN_X = 160, MARGIN_Y = 120;
+NODES.forEach(n => { n.x += MARGIN_X; n.y += MARGIN_Y; });
+
+const EDGES = [
+  { from:'user', to:'localconv', label:'Message (string / object)', color:'cyan', cite:'local_conversation.py:1629-1692' },
+  { from:'localconv', to:'eventlog', label:'MessageEvent → append_event', color:'cyan', cite:'state.py:315-334; event_store.py:184-223' },
+  { from:'state', to:'agent', label:'incrementally-built View', color:'cyan', cite:'state.py:336-381; agent.py:651-652' },
+  { from:'agent', to:'condenser', label:'state.view (when thresholds hit)', color:'amber', cite:'agent/utils.py:583-591' },
+  { from:'condenser', to:'llm', label:'stringified forgotten events (own LLM, maybe diff. provider)', color:'amber', cite:'llm_summarizing_condenser.py:188-206' },
+  { from:'condenser', to:'eventlog', label:'Condensation event (paraphrase summary)', color:'amber', cite:'agent.py:656-658' },
+  { from:'agent', to:'llm', label:'full messages + tool schemas (agent\'s own LLM)', color:'cyan', cite:'agent.py:691-697' },
+  { from:'llm', to:'ext_provider', label:'formatted messages, api_key — litellm HTTPS', color:'magenta', cite:'llm.py:2100-2125' },
+  { from:'llm', to:'filestore', label:'⚠ full unredacted messages → local JSON log', color:'red', cite:'telemetry.py:288-383' },
+  { from:'ext_provider', to:'agent', label:'LLMResponse (message, tool calls)', color:'magenta', cite:'agent.py:775-795' },
+  { from:'agent', to:'security', label:'tool-call arguments → risk eval', color:'cyan', cite:'agent.py:1015-1021' },
+  { from:'security', to:'ext_grayswan', label:'⚠ up to 20 recent events + pending action', color:'red', cite:'grayswan/analyzer.py:186' },
+  { from:'agent', to:'toolexec', label:'validated Action → execute', color:'cyan', cite:'agent.py:1293-1349' },
+  { from:'secrets', to:'toolexec', label:'matched secret values → shell env', color:'amber', cite:'secret_registry.py:64-94' },
+  { from:'toolexec', to:'eventlog', label:'masked output → ObservationEvent', color:'green', cite:'terminal/impl.py:360-384' },
+  { from:'mcp', to:'ext_mcp_server', label:'secret-expanded tool arguments', color:'magenta', cite:'mcp/tool.py:120-154' },
+  { from:'ext_mcp_server', to:'mcp', label:'tool result → masked (text only, not images)', color:'magenta', cite:'mcp/tool.py:168-189' },
+  { from:'skills', to:'ext_skills_repo', label:'git clone/fetch, full repo contents', color:'amber', cite:'skill.py:1204-1354' },
+  { from:'ext_skills_repo', to:'skills', label:'skill files → local disk cache (survives sessions)', color:'amber', cite:'skill.py:1265' },
+  { from:'skills', to:'agent', label:'⚠ `!command` → shell exec, full process privileges', color:'red', cite:'execute.py:52-95' },
+  { from:'delegate', to:'localconv', label:'spawn: brand-new LocalConversation instance', color:'violet', cite:'delegate/impl.py:230' },
+  { from:'delegate', to:'eventlog', label:'ONLY task:str text — not parent history/secrets', color:'violet', cite:'delegate/impl.py:332' },
+  { from:'delegate', to:'eventlog', label:'child final response → DelegateObservation → parent EventLog', color:'violet', cite:'delegate/impl.py:335-401' },
+  { from:'remoteconv', to:'ext_remote_server', label:'⚠ agent config incl. SECRETS IN PLAINTEXT', color:'red', cite:'remote_conversation.py:824-879' },
+  { from:'ext_remote_server', to:'remoteconv', label:'Event stream over WebSocket', color:'magenta', cite:'remote_conversation.py:126-273' },
+  { from:'workspace', to:'ext_remote_server', label:'commands, files, secret lookups over HTTP', color:'magenta', cite:'workspace/remote/base.py:133-568' },
+  { from:'state', to:'filestore', label:'base_state.json — cipher-encrypted or redacted', color:'green', cite:'state.py:421-442' },
+  { from:'eventlog', to:'filestore', label:'⚠ one JSON file per event, unencrypted at rest', color:'red', cite:'io/local.py:61-70' },
+  { from:'observability', to:'ext_laminar', label:'span data: function args/return unless ignored', color:'magenta', cite:'laminar.py:59-199' },
+  { from:'secrets', to:'ext_remote_server', label:'LookupSecret.get_value → HTTP GET', color:'amber', cite:'secrets.py:79-82' },
+  { from:'agentserver', to:'ext_remote_server', label:'(server-side, same process boundary)', color:'red', cite:'conversation_router.py:200-226' },
+];
+
+const svg = document.getElementById('edges');
+const canvas = document.getElementById('canvas');
+const NS = 'http://www.w3.org/2000/svg';
+
+function nodeCenter(n){ return { x:n.x + n.w/2, y:n.y + n.h/2 }; }
+function nodeById(id){ return NODES.find(n=>n.id===id); }
+
+function edgeMarkerId(color){ return 'arrow-' + color.replace('#',''); }
+
+const defs = document.createElementNS(NS,'defs');
+const uniqueColors = [...new Set(EDGES.map(e=>COLORS[e.color]))];
+uniqueColors.forEach(hex=>{
+  const marker = document.createElementNS(NS,'marker');
+  marker.setAttribute('id', 'arrow-'+hex.replace('#',''));
+  marker.setAttribute('viewBox','0 0 10 10');
+  marker.setAttribute('refX','8'); marker.setAttribute('refY','5');
+  marker.setAttribute('markerWidth','7'); marker.setAttribute('markerHeight','7');
+  marker.setAttribute('orient','auto-start-reverse');
+  const path = document.createElementNS(NS,'path');
+  path.setAttribute('d','M 0 0 L 10 5 L 0 10 z');
+  path.setAttribute('fill', hex);
+  marker.appendChild(path);
+  defs.appendChild(marker);
+});
+svg.appendChild(defs);
+
+function pointOnRectEdge(node, towardsX, towardsY){
+  const cx = node.x + node.w/2, cy = node.y + node.h/2;
+  const dx = towardsX - cx, dy = towardsY - cy;
+  if (dx === 0 && dy === 0) return {x:cx, y:cy};
+  const hw = node.w/2, hh = node.h/2;
+  const scaleX = hw / Math.abs(dx || 1e-6);
+  const scaleY = hh / Math.abs(dy || 1e-6);
+  const scale = Math.min(scaleX, scaleY);
+  return { x: cx + dx*scale, y: cy + dy*scale };
+}
+
+EDGES.forEach((e, idx) => {
+  const a = nodeById(e.from), b = nodeById(e.to);
+  if(!a || !b){ console.warn('missing node for edge', e); return; }
+  const ac = nodeCenter(a), bc = nodeCenter(b);
+  const p1 = pointOnRectEdge(a, bc.x, bc.y);
+  const p2 = pointOnRectEdge(b, ac.x, ac.y);
+  const hex = COLORS[e.color];
+
+  const path = document.createElementNS(NS,'path');
+  const midx = (p1.x+p2.x)/2, midy = (p1.y+p2.y)/2;
+  const d = `M ${p1.x} ${p1.y} Q ${midx} ${midy} ${p2.x} ${p2.y}`;
+  path.setAttribute('d', d);
+  path.setAttribute('fill','none');
+  path.setAttribute('stroke', hex);
+  path.setAttribute('stroke-width', e.color==='red' ? 2.2 : 1.4);
+  path.setAttribute('stroke-dasharray', e.color==='red' ? '2 7' : '4 8');
+  path.setAttribute('opacity', 0.65);
+  path.setAttribute('marker-end', `url(#${edgeMarkerId(hex)})`);
+  path.classList.add('flow-edge');
+  path.style.animation = `dash ${e.color==='red' ? 0.7 : 1.6}s linear infinite`;
+  path.dataset.edgeIdx = idx;
+  svg.appendChild(path);
+});
+
+const styleSheet = document.createElement('style');
+styleSheet.textContent = `@keyframes dash { to { stroke-dashoffset: -100; } }`;
+document.head.appendChild(styleSheet);
+
+const zones = [
+  { x:20, y:460, w:230, h:340, label:'Entry' },
+  { x:270, y:460, w:250, h:900, label:'Core Loop' },
+  { x:610, y:460, w:270, h:700, label:'Extensibility' },
+  { x:930, y:460, w:270, h:850, label:'Delegation · Security · Secrets' },
+  { x:1270, y:440, w:270, h:750, label:'Boundary Components' },
+  { x:1590, y:420, w:290, h:780, label:'External Services / Network' },
+];
+zones.forEach(z=>{
+  const div = document.createElement('div');
+  div.className = 'zone';
+  div.style.left = (z.x+MARGIN_X)+'px'; div.style.top = (z.y+MARGIN_Y)+'px';
+  div.style.width = z.w+'px'; div.style.height = z.h+'px';
+  const lbl = document.createElement('div');
+  lbl.className = 'zone-label'; lbl.textContent = z.label;
+  div.appendChild(lbl);
+  canvas.insertBefore(div, svg.nextSibling);
+});
+
+NODES.forEach(n=>{
+  const div = document.createElement('div');
+  div.className = `node shape-${n.shape}`;
+  div.style.left = n.x+'px'; div.style.top = n.y+'px';
+  div.style.width = n.w+'px'; div.style.height = n.h+'px';
+  div.style.setProperty('--c', COLORS[n.color]);
+  div.dataset.id = n.id;
+  if(n.rightEdge){ div.style.transformOrigin = 'right center'; }
+
+  if(n.shape === 'cylinder'){
+    div.innerHTML = `<div class="cyl-top"></div><div class="cyl-body"></div><div class="cyl-bottom"></div>
+      <div class="content"><div class="label">${n.label}</div><div class="sub">${n.sub||''}</div></div>`;
+  } else if(n.shape === 'diamond'){
+    div.innerHTML = `<div class="diamond-inner"></div>
+      <div class="content"><div class="label">${n.label}</div><div class="sub">${n.sub||''}</div></div>`;
+  } else if(n.shape === 'cloud'){
+    div.innerHTML = `<svg class="cloud-svg" viewBox="0 0 200 120" preserveAspectRatio="none">
+        <path d="M40,90 Q10,90 10,65 Q10,45 32,42 Q34,20 60,18 Q82,2 105,15 Q130,10 140,32 Q165,32 168,55 Q190,58 188,80 Q186,98 160,98 L45,98 Z"
+              fill="rgba(255,255,255,0.03)" stroke="${COLORS[n.color]}" stroke-width="2"/>
+      </svg>
+      <div class="content"><div class="label">${n.label}</div><div class="sub">${n.sub||''}</div></div>`;
+  } else {
+    div.innerHTML = `<div class="content"><div class="label">${n.label}</div><div class="sub">${n.sub||''}</div></div>`;
+  }
+
+  div.addEventListener('mouseenter', ()=>{ if(!pinned) showSidebar(n); highlightEdges(n.id, true); });
+  div.addEventListener('mouseleave', ()=>{ if(!pinned) hideIfNotPinned(); highlightEdges(n.id, false); });
+  div.addEventListener('click', ()=>{
+    if(pinnedId === n.id){ pinned=false; pinnedId=null; div.classList.remove('pinned'); hideSidebar(); }
+    else {
+      document.querySelectorAll('.node.pinned').forEach(el=>el.classList.remove('pinned'));
+      pinned=true; pinnedId = n.id; div.classList.add('pinned'); showSidebar(n);
+    }
+  });
+
+  canvas.appendChild(div);
+});
+
+function highlightEdges(id, on){
+  document.querySelectorAll('.flow-edge').forEach(p=>{
+    const idx = +p.dataset.edgeIdx;
+    const e = EDGES[idx];
+    if(e.from===id || e.to===id){
+      p.style.opacity = on ? '1' : '0.65';
+      p.style.strokeWidth = on ? '3' : (e.color==='red'?'2.2':'1.4');
+    }
+  });
+}
+
+let pinned = false, pinnedId = null;
+const sidebar = document.getElementById('sidebar');
+const sidebarContent = document.getElementById('sidebar-content');
+
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+function showSidebar(n){
+  const hex = COLORS[n.color];
+  let html = `<h2>${esc(n.label)}</h2>
+    <div class="sb-badge" style="--c:${hex}; border-color:${hex}; color:${hex};">${esc(n.color)}</div>`;
+  if(n.file) html += `<div class="sb-file citation">${esc(n.file)}</div>`;
+  if(n.identity) html += `<h3>Identity</h3><p>${esc(n.identity)}</p>`;
+  if(n.io && n.io.length){
+    html += `<h3>Inputs / Outputs</h3><ul>`;
+    n.io.forEach(x=> html += `<li class="citation" style="font-size:12px;">${esc(x)}</li>`);
+    html += `</ul>`;
+  }
+  if(n.boundaries){
+    html += `<h3>Privacy Boundary</h3>`;
+    html += `<div class="pbrow"><b>WHO</b><p>${esc(n.boundaries.who)}</p></div>`;
+    html += `<div class="pbrow"><b>WHAT</b><p>${esc(n.boundaries.what)}</p></div>`;
+    html += `<div class="pbrow"><b>HOW</b><p>${esc(n.boundaries.how)}</p></div>`;
+    html += `<div class="pbrow"><b>WHEN</b><p>${esc(n.boundaries.when)}</p></div>`;
+  }
+  if(n.persistence) html += `<h3>Persistence</h3><p>${esc(n.persistence)}</p>`;
+  if(n.delegation) html += `<h3>Delegation</h3><p>${esc(n.delegation)}</p>`;
+  sidebarContent.innerHTML = html;
+  sidebar.classList.add('open');
+}
+function hideIfNotPinned(){ if(!pinned) sidebar.classList.remove('open'); }
+function hideSidebar(){ sidebar.classList.remove('open'); }
+
+document.getElementById('sidebar-close').addEventListener('click', ()=>{
+  pinned=false; pinnedId=null;
+  document.querySelectorAll('.node.pinned').forEach(el=>el.classList.remove('pinned'));
+  hideSidebar();
+});
+
+const wrap = document.getElementById('canvas-wrap');
+let isDown=false, startX, startY, scrollLeft, scrollTop;
+wrap.addEventListener('mousedown', (e)=>{
+  if(e.target.closest('.node')) return;
+  isDown=true; wrap.classList.add('grabbing');
+  startX = e.pageX; startY = e.pageY; scrollLeft = wrap.scrollLeft; scrollTop = wrap.scrollTop;
+});
+window.addEventListener('mouseup', ()=>{ isDown=false; wrap.classList.remove('grabbing'); });
+window.addEventListener('mousemove', (e)=>{
+  if(!isDown) return;
+  wrap.scrollLeft = scrollLeft - (e.pageX - startX);
+  wrap.scrollTop = scrollTop - (e.pageY - startY);
+});
+
+let zoom = 1;
+function applyZoom(){ canvas.style.transform = `scale(${zoom})`; canvas.style.transformOrigin = '0 0'; }
+document.getElementById('zoom-in').addEventListener('click', ()=>{ zoom = Math.min(1.4, zoom+0.1); applyZoom(); });
+document.getElementById('zoom-out').addEventListener('click', ()=>{ zoom = Math.max(0.45, zoom-0.1); applyZoom(); });
+document.getElementById('zoom-reset').addEventListener('click', ()=>{ zoom = 0.72; applyZoom(); wrap.scrollLeft=0; wrap.scrollTop=420; });
+
+zoom = 0.68; applyZoom();
+wrap.scrollLeft = 0; wrap.scrollTop = 470;
+</script>
+</body>
+</html>

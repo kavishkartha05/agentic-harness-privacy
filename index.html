@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Harness Privacy — Architecture Audits</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#05070a; --cyan:#00f0ff; --green:#39ff88; --magenta:#ff2ec4; --red:#ff3b3b; --amber:#ffd23f; --violet:#b967ff;
+    --text:#e8f6ff; --text-dim:#7f93a8; --border-dim: rgba(232,246,255,0.12);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{ background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; min-height:100%; }
+  body{
+    background-image:
+      radial-gradient(circle at 15% 20%, rgba(0,240,255,0.06), transparent 45%),
+      radial-gradient(circle at 85% 75%, rgba(185,103,255,0.06), transparent 45%),
+      repeating-linear-gradient(0deg, #101826 0px, #101826 1px, transparent 1px, transparent 48px),
+      repeating-linear-gradient(90deg, #101826 0px, #101826 1px, transparent 1px, transparent 48px);
+    display:flex; flex-direction:column; align-items:center; padding:80px 24px 60px;
+  }
+  h1,h2{font-family:'Space Grotesk',sans-serif;}
+  .mono{font-family:'JetBrains Mono',monospace;}
+  header{max-width:760px; text-align:center; margin-bottom:64px;}
+  h1{font-size:34px; font-weight:700; margin-bottom:14px;}
+  h1 span{color:var(--cyan); text-shadow:0 0 16px rgba(0,240,255,0.5);}
+  header p{color:var(--text-dim); font-size:15px; line-height:1.7;}
+  header .note{margin-top:18px; font-size:12px; color:var(--text-dim); font-family:'JetBrains Mono',monospace;}
+
+  .cards{ display:flex; gap:28px; flex-wrap:wrap; justify-content:center; max-width:1000px; }
+  .card{
+    width:420px; background:linear-gradient(160deg, rgba(255,255,255,0.04), rgba(255,255,255,0.008));
+    border:1.5px solid var(--border-dim); border-radius:16px; padding:32px;
+    text-decoration:none; color:var(--text); transition:transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+    display:block;
+  }
+  .card:hover{ transform:translateY(-4px); border-color:var(--c); box-shadow:0 0 30px var(--cglow); }
+  .card .eyebrow{font-size:11px; letter-spacing:2px; text-transform:uppercase; color:var(--c); font-family:'JetBrains Mono',monospace; margin-bottom:12px;}
+  .card h2{font-size:24px; margin-bottom:10px;}
+  .card p{font-size:13.5px; color:var(--text-dim); line-height:1.6; margin-bottom:18px;}
+  .card .stats{display:flex; gap:18px; font-size:12px; color:var(--text-dim); font-family:'JetBrains Mono',monospace; border-top:1px solid var(--border-dim); padding-top:16px;}
+  .card .stats b{color:var(--text); font-weight:600;}
+  .card .go{margin-top:16px; font-size:12.5px; color:var(--c); font-weight:600;}
+
+  footer{margin-top:70px; font-size:11.5px; color:var(--text-dim); text-align:center; max-width:600px; line-height:1.7; font-family:'JetBrains Mono',monospace;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Agentic Harness <span>Privacy</span> Audits</h1>
+  <p>Interactive, citation-only architecture diagrams built from direct source-code audits — every claim traced to an exact file and line number, nothing inferred from documentation or training data.</p>
+  <div class="note">Part of the Agentic Harness Privacy project · Open Source Evaluations</div>
+</header>
+
+<div class="cards">
+  <a class="card" href="openhands.html" style="--c:#00f0ff; --cglow: rgba(0,240,255,0.25);">
+    <div class="eyebrow">Full Agent with Built-in Harness</div>
+    <h2>OpenHands</h2>
+    <p>software-agent-sdk v1.35.0 · commit cf6c2a3a. 17 components traced, including confirmed plaintext secret exposure to remote agent servers, unfiltered event persistence, and shell-execution risk in the skills system.</p>
+    <div class="stats"><span><b>17</b> components</span><span><b>31</b> data-flow edges</span><span><b>6</b> confirmed risks</span></div>
+    <div class="go">Explore the audit →</div>
+  </a>
+
+  <a class="card" href="langgraph.html" style="--c:#ff2ec4; --cglow: rgba(255,46,196,0.22);">
+    <div class="eyebrow">Open-Source Harness Framework</div>
+    <h2>LangGraph</h2>
+    <p>langgraph 1.2.9 · checkpoint 4.1.1 · commit 55ec2f21. Confirms the checkpointer/store cross-session distinction structurally, and surfaces two findings that contradict common assumptions about subgraph isolation.</p>
+    <div class="stats"><span><b>7</b> components</span><span><b>13</b> data-flow edges</span><span><b>2</b> surprising findings</span></div>
+    <div class="go">Explore the audit →</div>
+  </a>
+</div>
+
+<footer>
+  Every citation in these diagrams is verbatim from the source repositories at the commits listed on each page.<br>
+  No claim is derived from documentation, marketing material, or prior model knowledge of these projects.
+</footer>
+
+</body>
+</html>
