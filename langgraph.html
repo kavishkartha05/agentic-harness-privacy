@@ -376,6 +376,7 @@ NODES.forEach(n=>{
   div.addEventListener('mouseenter', ()=>{ if(!pinned) showSidebar(n); highlightEdges(n.id, true); });
   div.addEventListener('mouseleave', ()=>{ if(!pinned) hideIfNotPinned(); highlightEdges(n.id, false); });
   div.addEventListener('click', ()=>{
+    if(dragMoved) return;
     if(pinnedId === n.id){ pinned=false; pinnedId=null; div.classList.remove('pinned'); hideSidebar(); }
     else {
       document.querySelectorAll('.node.pinned').forEach(el=>el.classList.remove('pinned'));
@@ -435,10 +436,9 @@ document.getElementById('sidebar-close').addEventListener('click', ()=>{
 });
 
 const wrap = document.getElementById('canvas-wrap');
-let isDown=false, startX, startY, scrollLeft, scrollTop;
+let isDown=false, startX, startY, scrollLeft, scrollTop, dragMoved=false;
 wrap.addEventListener('mousedown', (e)=>{
-  if(e.target.closest('.node')) return;
-  isDown=true; wrap.classList.add('grabbing');
+  isDown=true; dragMoved=false; wrap.classList.add('grabbing');
   startX = e.pageX; startY = e.pageY; scrollLeft = wrap.scrollLeft; scrollTop = wrap.scrollTop;
 });
 window.addEventListener('mouseup', ()=>{ isDown=false; wrap.classList.remove('grabbing'); });
@@ -450,6 +450,7 @@ function getScrollBounds(){
 }
 window.addEventListener('mousemove', (e)=>{
   if(!isDown) return;
+  if(Math.abs(e.pageX-startX) > 5 || Math.abs(e.pageY-startY) > 5) dragMoved = true;
   const b = getScrollBounds();
   wrap.scrollLeft = Math.min(b.maxX, Math.max(0, scrollLeft - (e.pageX - startX)));
   wrap.scrollTop = Math.min(b.maxY, Math.max(0, scrollTop - (e.pageY - startY)));
